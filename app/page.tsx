@@ -1,23 +1,26 @@
-import { supabase } from './lib/supabase'
+import { getInventarioCompleto } from './lib/inventario.service'
 import CatalogoInteractivo from './components/CatalogoInteractivo'
 
 export const revalidate = 0 
 
 export default async function Home() {
-  // El servidor hace el trabajo pesado: extraer datos
-  const { data: inventario, error } = await supabase
-    .from('inventario')
-    .select('*')
-    .order('nombre', { ascending: true })
+  let inventario = []
+  let errorBD = null
 
-  if (error) {
-    return <div className="p-10 text-red-500 font-bold">Error crítico de base de datos: {error.message}</div>
+  try {
+    // La página llama al servicio directamente. Cero red externa.
+    inventario = await getInventarioCompleto()
+  } catch (error: any) {
+    errorBD = error.message
+  }
+
+  if (errorBD) {
+    return <div className="p-10 text-red-500 font-bold">Error crítico: {errorBD}</div>
   }
 
   return (
     <main className="p-6 md:p-10 bg-gray-50 min-h-screen">
       <div className="max-w-7xl mx-auto">
-        
         <header className="mb-8 flex items-center justify-between">
           <div>
             <h1 className="text-3xl md:text-4xl font-black text-[#04558C] tracking-tight">
@@ -27,9 +30,8 @@ export default async function Home() {
           </div>
         </header>
         
-        {/* Le inyectamos los datos al componente cliente */}
-        <CatalogoInteractivo inventario={inventario || []} />
-        
+        {/* Inyectamos los datos al componente cliente */}
+        <CatalogoInteractivo inventario={inventario} />
       </div>
     </main>
   )
