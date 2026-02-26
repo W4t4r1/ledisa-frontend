@@ -22,6 +22,15 @@ export default function CatalogoInteractivo({ inventario }: { inventario: any[] 
     return coincideTexto && coincideCat && coincideColor
   })
 
+  const numeroWhatsApp = "51998113276" 
+
+  const generarEnlaceWhatsApp = (item: any) => {
+    const colorTexto = item.color ? `\n🎨 Color: ${item.color}` : ''
+    const mensaje = `Hola LEDISA, estoy interesado en este producto:\n\n📦 *${item.nombre}*\n🔖 Código: ${item.id}${colorTexto}\n💰 Precio Listado: S/. ${item.precio}\n\n¿Tienen stock disponible para entrega inmediata?`
+    
+    return `https://wa.me/${numeroWhatsApp}?text=${encodeURIComponent(mensaje)}`
+  }
+
   return (
     <div>
       {/* BARRA DE CONTROLES */}
@@ -61,7 +70,7 @@ export default function CatalogoInteractivo({ inventario }: { inventario: any[] 
         Mostrando {productosFiltrados.length} productos
       </p>
 
-      {/* GRILLA DE RESULTADOS */}
+{/* GRILLA DE RESULTADOS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
         {productosFiltrados.map((item) => (
           <div key={item.id} className="bg-white p-4 rounded-lg shadow-md border border-gray-200 hover:shadow-lg transition-shadow flex flex-col">
@@ -97,6 +106,16 @@ export default function CatalogoInteractivo({ inventario }: { inventario: any[] 
                 S/. {item.precio}
               </span>
             </div>
+
+          {/* 4. EL CALL TO ACTION */}
+            <a 
+              href={generarEnlaceWhatsApp(item)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 w-full bg-[#25D366] hover:bg-[#128C7E] text-white text-center py-2 rounded-md font-bold transition-colors flex items-center justify-center gap-2"
+            >
+              <span>💬 Cotizar por WhatsApp</span>
+            </a>
           </div>
         ))}
       </div>
