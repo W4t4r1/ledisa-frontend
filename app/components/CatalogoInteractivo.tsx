@@ -26,7 +26,8 @@ export default function CatalogoInteractivo({ inventario }: { inventario: any[] 
 
   const generarEnlaceWhatsApp = (item: any) => {
     const colorTexto = item.color ? `\n🎨 Color: ${item.color}` : ''
-    const mensaje = `Hola LEDISA, estoy interesado en este producto:\n\n📦 *${item.nombre}*\n🔖 Código: ${item.id}${colorTexto}\n💰 Precio Listado: S/. ${item.precio}\n\n¿Tienen stock disponible para entrega inmediata?`
+    // Ahora el mensaje incita a preguntar el precio y confirmar cantidades
+    const mensaje = `Hola LEDISA, estoy interesado en cotizar este producto:\n\n📦 *${item.nombre}*\n🔖 Código: ${item.id}${colorTexto}\n\n¿Me podrían confirmar el precio y si hay disponibilidad para mi obra?`
     
     return `https://wa.me/${numeroWhatsApp}?text=${encodeURIComponent(mensaje)}`
   }
@@ -98,23 +99,24 @@ export default function CatalogoInteractivo({ inventario }: { inventario: any[] 
               )}
             </div>
             
+              {/* 3. ESTADO DE DISPONIBILIDAD (Sin números, sin precios exactos) */}
             <div className="flex justify-between items-center border-t pt-3 mt-auto">
-              <span className={`text-xs px-2 py-1 rounded font-bold ${item.stock > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                {item.stock > 0 ? `Stock: ${item.stock}` : 'Agotado'}
+              <span className={`text-xs px-3 py-1.5 rounded-full font-black tracking-wide ${item.stock > 0 ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'}`}>
+                {item.stock > 0 ? '🟢 DISPONIBLE' : '🔴 AGOTADO'}
               </span>
-              <span className="text-lg font-black text-[#04558C]">
-                S/. {item.precio}
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                Precio x Interno
               </span>
             </div>
 
-          {/* 4. EL CALL TO ACTION */}
+            {/* 4. EL CALL TO ACTION */}
             <a 
               href={generarEnlaceWhatsApp(item)}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-4 w-full bg-[#25D366] hover:bg-[#128C7E] text-white text-center py-2 rounded-md font-bold transition-colors flex items-center justify-center gap-2"
+              className="mt-4 w-full bg-[#25D366] hover:bg-[#128C7E] text-white text-center py-3 rounded-md font-bold transition-colors flex items-center justify-center gap-2 shadow-sm"
             >
-              <span>💬 Cotizar por WhatsApp</span>
+              <span>💬 Solicitar Cotización</span>
             </a>
           </div>
         ))}

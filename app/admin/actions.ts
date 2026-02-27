@@ -1,0 +1,39 @@
+'use server'
+
+import { supabase } from '../lib/supabase'
+import { revalidatePath } from 'next/cache'
+
+// ACCIÓN 1: ELIMINAR
+export async function eliminarProducto(id: string) {
+  const { error } = await supabase.from('inventario').delete().eq('id', id)
+  
+  if (error) {
+    throw new Error(`Error al eliminar en Supabase: ${error.message}`)
+  }
+  
+  // Forzamos a Next.js a limpiar su caché y buscar los datos frescos
+  revalidatePath('/admin')
+}
+
+// ACCIÓN 2: GUARDAR (Crea si es nuevo, Actualiza si ya existe)
+export async function guardarProducto(productoBase: any, esEdicion: boolean) {
+  // Limpiamos los datos antes de inyectarlos
+  const producto = {
+    ...productoBase,
+    precio: parseFloat(productoBase.precio),
+    stock: parseInt(productoBase.stock),
+    m2_caja: parseFloat(productoBase.m2_caja || 0),
+    color: productoBase.color?.trim() || null,
+    imagen: productoBase.imagen?.trim() || null
+  }
+
+  if (esEdicion) {
+    const { error } = await supabase.from('inventario').update(producto).eq('id', producto.id)
+    if (error) throw new Error(error.message)
+  } else {
+    const { error } = await supabase.from('inventario').insert(producto)
+    if (error) throw new Error(error.message)
+  }
+
+  revalidatePath('/admin')
+}
