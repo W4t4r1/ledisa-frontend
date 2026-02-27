@@ -12,14 +12,29 @@ export default function CatalogoInteractivo({ inventario }: { inventario: any[] 
   const categorias = Array.from(new Set(inventario.map(item => item.categoria).filter(Boolean)))
   const colores = Array.from(new Set(inventario.map(item => item.color).filter(c => c && c.trim() !== '')))
 
-  // 3. Motor de filtrado estricto
-  const productosFiltrados = inventario.filter(item => {
+// 3. Motor de filtrado estricto
+  let productosFiltrados = inventario.filter(item => {
     const coincideTexto = item.nombre.toLowerCase().includes(busqueda.toLowerCase()) || 
                           item.id.toLowerCase().includes(busqueda.toLowerCase())
     const coincideCat = categoriaSel === '' || item.categoria === categoriaSel
     const coincideColor = colorSel === '' || item.color === colorSel
     
     return coincideTexto && coincideCat && coincideColor
+  })
+
+  // 4. Algoritmo de Vitrina Comercial
+  productosFiltrados.sort((a, b) => {
+    // Prioridad 1: Los que tienen imagen van arriba
+    const tieneImgA = a.imagen && a.imagen.trim() !== '' ? 1 : 0
+    const tieneImgB = b.imagen && b.imagen.trim() !== '' ? 1 : 0
+    if (tieneImgB !== tieneImgA) return tieneImgB - tieneImgA
+
+    // Prioridad 2: Productos Ancla (Cerámicos/Porcelanatos) van antes que accesorios
+    const esPrincipalA = (a.categoria || '').toLowerCase().match(/cerámic|porcelanato/i) ? 1 : 0
+    const esPrincipalB = (b.categoria || '').toLowerCase().match(/cerámic|porcelanato/i) ? 1 : 0
+    if (esPrincipalB !== esPrincipalA) return esPrincipalB - esPrincipalA
+
+    return 0 // Mantienen su orden alfabético si empatan
   })
 
   const numeroWhatsApp = "51998113276" 
@@ -99,13 +114,10 @@ export default function CatalogoInteractivo({ inventario }: { inventario: any[] 
               )}
             </div>
             
-              {/* 3. ESTADO DE DISPONIBILIDAD (Sin números, sin precios exactos) */}
-            <div className="flex justify-between items-center border-t pt-3 mt-auto">
+            {/* 3. ESTADO DE DISPONIBILIDAD (Limpio y directo) */}
+            <div className="flex justify-start items-center border-t pt-3 mt-auto">
               <span className={`text-xs px-3 py-1.5 rounded-full font-black tracking-wide ${item.stock > 0 ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'}`}>
                 {item.stock > 0 ? '🟢 DISPONIBLE' : '🔴 AGOTADO'}
-              </span>
-              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                Precio x Interno
               </span>
             </div>
 
