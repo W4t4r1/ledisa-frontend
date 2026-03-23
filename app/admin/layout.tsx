@@ -28,6 +28,9 @@ export default function AdminLayout({
         <Link href="/admin/calculadora" className="block px-4 py-3 rounded hover:bg-[#033f6b] transition-colors font-semibold">
             📐 Calculadora de Obra
           </Link>
+          <Link href="/admin/consultor" className="block px-4 py-3 rounded hover:bg-[#033f6b] transition-colors font-semibold">
+            🧠 Consultor IA
+          </Link>
 
         <div className="p-4 border-t border-[#033f6b]">
           <div className="text-xs text-blue-200 font-mono break-all">
