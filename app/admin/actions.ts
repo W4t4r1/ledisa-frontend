@@ -17,9 +17,15 @@ export async function eliminarProducto(id: string) {
 
 // ACCIÓN 2: GUARDAR (Crea si es nuevo, Actualiza si ya existe)
 export async function guardarProducto(productoBase: any, esEdicion: boolean) {
+  // Autogeneramos nombre si está vacío y completamos la marca como 'OTRO' si no se especifica
+  const nombreAutogenerado = (productoBase.nombre || '').trim() || `${productoBase.categoria || 'Producto'} ${productoBase.id}`;
+  const marcaAutogenerada = (productoBase.marca || '').trim() || 'OTRO';
+
   // Limpiamos los datos antes de inyectarlos
   const producto = {
     ...productoBase,
+    nombre: nombreAutogenerado,
+    marca: marcaAutogenerada,
     precio: parseFloat(productoBase.precio),
     stock: parseInt(productoBase.stock),
     m2_caja: parseFloat(productoBase.m2_caja || 0),

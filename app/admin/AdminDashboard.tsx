@@ -170,16 +170,64 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                 <input required disabled={esEdicion} type="text" className="w-full border p-2 rounded disabled:bg-gray-100 text-gray-900 bg-white" value={form.id} onChange={e => setForm({...form, id: e.target.value})} />
               </div>
               <div className="col-span-2 md:col-span-1">
-                <label className="text-xs font-bold text-gray-500 block mb-1">Nombre*</label>
-                <input required type="text" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} />
+                <label className="text-xs font-bold text-gray-500 block mb-1">Nombre (Opcional - se autogenera si se deja vacío)</label>
+                <input type="text" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} />
               </div>
               <div className="col-span-2 md:col-span-1">
-                <label className="text-xs font-bold text-gray-500 block mb-1">Categoría</label>
-                <input type="text" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.categoria} onChange={e => setForm({...form, categoria: e.target.value})} />
+                <label className="text-xs font-bold text-gray-500 block mb-1">Categoría*</label>
+                <input required type="text" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.categoria} onChange={e => setForm({...form, categoria: e.target.value})} />
+                
+                {/* SUGERENCIAS DE CATEGORÍA */}
+                <div className="mt-2 text-xs">
+                  <span className="text-gray-400 block mb-1 font-semibold">Sugerencias rápidas:</span>
+                  <div className="flex flex-col gap-1.5 max-h-28 overflow-y-auto border border-gray-200 p-2 rounded bg-gray-50">
+                    {[
+                      { g: '💎 Mayólicas', c: ['Piso', 'Pared', 'Porcelanato'] },
+                      { g: '🚽 Sanitarios', c: ['Inodoro', 'Taza', 'Tanque', 'Lavatorio', 'Tubo de abasto'] },
+                      { g: '✨ Decoraciones', c: ['Listelo', 'Decorado'] },
+                      { g: '🚰 Griferías', c: ['Grifería', 'Mezcladora'] },
+                      { g: '🛠️ Instalación', c: ['Fragua', 'Varillas', 'Pegamento', 'Crucetas'] },
+                      { g: '🏷️ Saldos', c: ['Saldos', 'Piezas Antiguas', 'Cajas Antiguas'] }
+                    ].map(grupo => (
+                      <div key={grupo.g} className="flex flex-wrap items-center gap-1 border-b border-gray-100 pb-1 last:border-b-0 last:pb-0">
+                        <span className="text-[10px] text-gray-500 font-bold mr-1 w-20 shrink-0">{grupo.g}:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {grupo.c.map(cat => (
+                            <button
+                              key={cat}
+                              type="button"
+                              onClick={() => setForm({ ...form, categoria: cat })}
+                              className="bg-white border border-gray-200 text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 hover:border-gray-300 transition-colors text-[10px] font-medium cursor-pointer"
+                            >
+                              {cat}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div className="col-span-2 md:col-span-1">
-                <label className="text-xs font-bold text-gray-500 block mb-1">Marca</label>
-                <input type="text" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.marca} onChange={e => setForm({...form, marca: e.target.value})} />
+                <label className="text-xs font-bold text-gray-500 block mb-1">Marca (Opcional - se guarda como OTRO si se deja vacío)</label>
+                <input type="text" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.marca || ''} onChange={e => setForm({...form, marca: e.target.value})} />
+                
+                {/* SUGERENCIAS DE MARCA */}
+                <div className="mt-2 text-xs">
+                  <span className="text-gray-400 block mb-1 font-semibold">Sugerencias rápidas:</span>
+                  <div className="flex flex-wrap gap-1 border border-gray-200 p-2 rounded bg-gray-50">
+                    {['Celima', 'Trebol', 'San Lorenzo', 'OTRO'].map(marca => (
+                      <button
+                        key={marca}
+                        type="button"
+                        onClick={() => setForm({ ...form, marca: marca })}
+                        className="bg-white border border-gray-200 text-gray-700 px-2 py-0.5 rounded hover:bg-gray-100 hover:border-gray-300 transition-colors text-[10px] font-medium cursor-pointer"
+                      >
+                        {marca}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div className="col-span-2 md:col-span-1">
                 <label className="text-xs font-bold text-gray-500 block mb-1">Precio (S/.)*</label>
