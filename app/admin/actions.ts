@@ -24,7 +24,8 @@ export async function guardarProducto(productoBase: any, esEdicion: boolean) {
     stock: parseInt(productoBase.stock),
     m2_caja: parseFloat(productoBase.m2_caja || 0),
     color: productoBase.color?.trim() || null,
-    imagen: productoBase.imagen?.trim() || null
+    imagen: productoBase.imagen?.trim() || null,
+    oculto: !!productoBase.oculto
   }
 
   if (esEdicion) {
@@ -33,6 +34,20 @@ export async function guardarProducto(productoBase: any, esEdicion: boolean) {
   } else {
     const { error } = await supabase.from('inventario').insert(producto)
     if (error) throw new Error(error.message)
+  }
+
+  revalidatePath('/admin')
+}
+
+// ACCIÓN 3: CAMBIAR VISIBILIDAD (OCULTAR / MOSTRAR)
+export async function toggleVisibilidadProducto(id: string, oculto: boolean) {
+  const { error } = await supabase
+    .from('inventario')
+    .update({ oculto })
+    .eq('id', id)
+
+  if (error) {
+    throw new Error(`Error al cambiar visibilidad en Supabase: ${error.message}`)
   }
 
   revalidatePath('/admin')

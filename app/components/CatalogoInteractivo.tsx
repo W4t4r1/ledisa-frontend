@@ -18,8 +18,9 @@ export default function CatalogoInteractivo({ inventario }: { inventario: any[] 
                           item.id.toLowerCase().includes(busqueda.toLowerCase())
     const coincideCat = categoriaSel === '' || item.categoria === categoriaSel
     const coincideColor = colorSel === '' || item.color === colorSel
+    const noEstaOculto = !item.oculto
     
-    return coincideTexto && coincideCat && coincideColor
+    return coincideTexto && coincideCat && coincideColor && noEstaOculto
   })
 
   // 4. Algoritmo de Vitrina Comercial

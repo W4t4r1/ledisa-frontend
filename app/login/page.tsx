@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { hashPassword } from '../lib/auth'
 
 export default function LoginPage({
   searchParams,
@@ -16,8 +17,9 @@ export default function LoginPage({
     if (passwordIngresado === passwordReal) {
       // CORRECCIÓN CRÍTICA: Esperamos la promesa de las cookies (Next.js 15+)
       const cookieStore = await cookies()
+      const hashedPassword = await hashPassword(passwordReal)
       
-      cookieStore.set('ledisa_admin_session', passwordReal, {
+      cookieStore.set('ledisa_admin_session', hashedPassword, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         maxAge: 60 * 60 * 24, // 1 día
@@ -51,7 +53,7 @@ export default function LoginPage({
               name="password"
               placeholder="Contraseña"
               required
-              className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:border-[#04558C]"
+              className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:border-[#04558C] text-gray-900"
             />
           </div>
           <button

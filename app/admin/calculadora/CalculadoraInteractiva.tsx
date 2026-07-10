@@ -37,7 +37,7 @@ export default function CalculadoraInteractiva({ productos }: { productos: any[]
               <label className="block text-xs font-bold text-gray-500 mb-1">Largo (metros)</label>
               <input 
                 type="number" step="0.01" min="0"
-                className="w-full border p-2 rounded focus:outline-none focus:border-[#04558C]"
+                className="w-full border p-2 rounded focus:outline-none focus:border-[#04558C] text-gray-900 bg-white"
                 value={largo || ''} onChange={(e) => setLargo(parseFloat(e.target.value) || 0)}
               />
             </div>
@@ -45,7 +45,7 @@ export default function CalculadoraInteractiva({ productos }: { productos: any[]
               <label className="block text-xs font-bold text-gray-500 mb-1">Ancho (metros)</label>
               <input 
                 type="number" step="0.01" min="0"
-                className="w-full border p-2 rounded focus:outline-none focus:border-[#04558C]"
+                className="w-full border p-2 rounded focus:outline-none focus:border-[#04558C] text-gray-900 bg-white"
                 value={ancho || ''} onChange={(e) => setAncho(parseFloat(e.target.value) || 0)}
               />
             </div>
@@ -55,7 +55,7 @@ export default function CalculadoraInteractiva({ productos }: { productos: any[]
             <label className="block text-xs font-bold text-gray-500 mb-1">Margen de Merma/Cortes (%)</label>
             <input 
               type="number" min="0" max="30"
-              className="w-full border p-2 rounded focus:outline-none focus:border-[#04558C]"
+              className="w-full border p-2 rounded focus:outline-none focus:border-[#04558C] text-gray-900 bg-white"
               value={merma} onChange={(e) => setMerma(parseFloat(e.target.value) || 0)}
             />
           </div>
@@ -63,7 +63,7 @@ export default function CalculadoraInteractiva({ productos }: { productos: any[]
           <div className="pt-4 border-t">
             <label className="block text-xs font-bold text-gray-500 mb-1">Seleccionar Revestimiento</label>
             <select 
-              className="w-full border p-2 rounded bg-gray-50 focus:outline-none focus:border-[#04558C]"
+              className="w-full border p-2 rounded bg-white text-gray-900 focus:outline-none focus:border-[#04558C]"
               value={productoSelId} onChange={(e) => setProductoSelId(e.target.value)}
             >
               <option value="">-- Elija un modelo --</option>
