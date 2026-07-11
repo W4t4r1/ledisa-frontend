@@ -29,6 +29,7 @@ export async function guardarProducto(productoBase: any, esEdicion: boolean) {
     precio: parseFloat(productoBase.precio),
     stock: parseInt(productoBase.stock),
     m2_caja: parseFloat(productoBase.m2_caja || 0),
+    piezas_sueltas: parseInt(productoBase.piezas_sueltas || 0),
     color: productoBase.color?.trim() || null,
     imagen: productoBase.imagen?.trim() || null,
     oculto: !!productoBase.oculto

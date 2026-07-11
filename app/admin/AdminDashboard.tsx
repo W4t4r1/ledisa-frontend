@@ -14,7 +14,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
   // Estado para guardar temporalmente lo que el usuario escribe
   const [form, setForm] = useState({
     id: '', nombre: '', categoria: 'Porcelanato', marca: '',
-    precio: 0, stock: 0, m2_caja: 0, color: '', imagen: '',
+    precio: 0, stock: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '',
     oculto: false
   })
 
@@ -52,11 +52,13 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
     if (producto) {
       setForm({
         ...producto,
-        oculto: !!producto.oculto
+        oculto: !!producto.oculto,
+        piezas_sueltas: producto.piezas_sueltas || 0,
+        m2_caja: producto.m2_caja || 0
       })
       setEsEdicion(true)
     } else {
-      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, stock: 0, m2_caja: 0, color: '', imagen: '', oculto: false })
+      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, stock: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '', oculto: false })
       setEsEdicion(false)
     }
     setMostrarModal(true)
@@ -123,9 +125,22 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                 </td>
                 <td className="p-3 text-right font-bold text-[#04558C]">S/. {item.precio}</td>
                 <td className="p-3 text-center">
-                  <span className={`px-2 py-1 rounded text-xs font-bold ${item.stock > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {item.stock}
-                  </span>
+                  <div className="flex flex-col items-center gap-0.5">
+                    {item.m2_caja > 0 ? (
+                      <>
+                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${item.stock > 0 || item.piezas_sueltas > 0 ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200'}`}>
+                          {item.stock} cjs {item.piezas_sueltas > 0 ? `+ ${item.piezas_sueltas} pzs` : ''}
+                        </span>
+                        <span className="text-[10px] text-gray-500 font-semibold">
+                          ({(item.stock * item.m2_caja).toFixed(2)} m²)
+                        </span>
+                      </>
+                    ) : (
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${item.stock > 0 ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200'}`}>
+                        {item.stock} pzs
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="p-3 text-center">
                   <button 
@@ -234,8 +249,23 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                 <input required type="number" step="0.1" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.precio} onChange={e => setForm({...form, precio: parseFloat(e.target.value) || 0})} />
               </div>
               <div className="col-span-2 md:col-span-1">
-                <label className="text-xs font-bold text-gray-500 block mb-1">Stock*</label>
+                <label className="text-xs font-bold text-gray-500 block mb-1">Stock (Cajas)*</label>
                 <input required type="number" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.stock} onChange={e => setForm({...form, stock: parseInt(e.target.value) || 0})} />
+                <span className="text-[10px] text-gray-400 block mt-1">
+                  {form.m2_caja > 0 
+                    ? `Equivale a ${(form.stock * form.m2_caja).toFixed(2)} m² totales en stock` 
+                    : 'Cantidad de piezas o unidades físicas en stock'}
+                </span>
+              </div>
+              <div className="col-span-2 md:col-span-1">
+                <label className="text-xs font-bold text-gray-500 block mb-1">Rendimiento (m² por caja)</label>
+                <input type="number" step="0.01" min="0" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.m2_caja || 0} onChange={e => setForm({...form, m2_caja: parseFloat(e.target.value) || 0})} />
+                <span className="text-[10px] text-gray-400 block mt-1">Dejar en 0 si es por piezas (ej. sanitarios, grifería, listelos)</span>
+              </div>
+              <div className="col-span-2 md:col-span-1">
+                <label className="text-xs font-bold text-gray-500 block mb-1">Piezas Sueltas (Adicionales)</label>
+                <input type="number" min="0" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.piezas_sueltas || 0} onChange={e => setForm({...form, piezas_sueltas: parseInt(e.target.value) || 0})} />
+                <span className="text-[10px] text-gray-400 block mt-1">Piezas sueltas adicionales fuera de las cajas</span>
               </div>
               <div className="col-span-2 md:col-span-1">
                 <label className="text-xs font-bold text-gray-500 block mb-1">Color (Opcional)</label>

@@ -232,15 +232,17 @@ export default function CatalogoInteractivo({ inventario }: { inventario: any[] 
               </div>
               
               {/* ESTADO DE DISPONIBILIDAD */}
-              <div className="flex justify-between items-center border-t pt-3 mt-auto">
-                <span className={`text-xs px-2.5 py-1 rounded-full font-black tracking-wide ${item.stock > 0 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                  {item.stock > 0 ? '🟢 DISPONIBLE' : '🔴 AGOTADO'}
-                </span>
-                {item.precio > 0 && (
-                  <span className="text-sm font-bold text-gray-800">
-                    S/. {item.precio}
+              <div className="flex flex-col gap-1.5 border-t pt-3 mt-auto">
+                <div className="flex justify-between items-center">
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-black tracking-wide ${(item.m2_caja > 0 ? (item.stock > 0 || item.piezas_sueltas > 0) : item.stock > 0) ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                    {(item.m2_caja > 0 ? (item.stock > 0 || item.piezas_sueltas > 0) : item.stock > 0) ? '🟢 DISPONIBLE' : '🔴 AGOTADO'}
                   </span>
-                )}
+                  {item.precio > 0 && (
+                    <span className="text-sm font-bold text-gray-800">
+                      S/. {item.precio} <span className="text-[10px] text-gray-400 font-medium">{item.m2_caja > 0 ? '/ caja' : '/ und'}</span>
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* CALL TO ACTION */}

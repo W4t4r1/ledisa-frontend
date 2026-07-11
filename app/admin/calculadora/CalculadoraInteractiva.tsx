@@ -110,7 +110,7 @@ export default function CalculadoraInteractiva({ productos }: { productos: any[]
               {/* Validación de inventario físico */}
               {productoSelec.stock < cajasNecesarias && (
                 <div className="mt-4 bg-red-500 text-white text-xs font-bold p-2 rounded text-center uppercase tracking-wider">
-                  ⚠️ Alerta: Stock Insuficiente (Faltan {cajasNecesarias - productoSelec.stock} cajas)
+                  ⚠️ Alerta: Stock Insuficiente (Faltan {cajasNecesarias - productoSelec.stock} cajas / {((cajasNecesarias - productoSelec.stock) * productoSelec.m2_caja).toFixed(2)} m²)
                 </div>
               )}
             </>
