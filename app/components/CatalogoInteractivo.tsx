@@ -11,7 +11,7 @@ const SECCIONES = [
   { id: 'saldos', nombre: 'Saldos y Liquidaciones', emoji: '🏷️' }
 ]
 
-function obtenerSeccionProducto(item: any): string {
+export function obtenerSeccionProducto(item: any): string {
   const cat = (item.categoria || '').toLowerCase().trim();
   const nom = (item.nombre || '').toLowerCase().trim();
 

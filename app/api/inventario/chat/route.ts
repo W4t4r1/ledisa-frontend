@@ -43,6 +43,12 @@ export async function POST(req: Request) {
       - Cross-Selling (Venta Cruzada): Si cotizan un piso o pared, recuérdales siempre que necesitan Pegamento y Fragua, e intenta calcularlos si tienes los datos en el inventario.
       - Tono persuasivo: Redacta tus recomendaciones de manera que el administrador pueda copiarlas y pegarlas directamente al cliente por WhatsApp para cerrar la venta.
 
+      3. REGLA DE UNIDADES Y SUFIJOS:
+      - Para los productos con rendimiento (m2/caja > 0), el stock se mide en cajas y piezas sueltas (ej. 5 cajas + 2 piezas).
+      - Para los productos individuales sin rendimiento (rendimiento = 0):
+        * Si pertenecen a las categorías de mayólicas, porcelanatos, decoraciones (listelos, cenefas, decorados) o saldos, la unidad de medida es "piezas" o "pzs" (ej. "3 listelos").
+        * Para cualquier otra categoría (como sanitarios, griferías, fragua, pegamento, crucetas, etc.), la unidad de medida es obligatoriamente "unidades" o "und" (o especificar el formato como "bolsas de pegamento", "bolsas de fragua"). NUNCA les llames "piezas" o "pzs" a estos. Por ejemplo: di "5 bolsas de fragua" o "5 unidades de fragua", jamás "5 piezas de fragua".
+
       REGLA DE ORO INQUEBRANTABLE: Jamás inventes productos, marcas, colores o precios que no existan explícitamente en la lista del inventario proporcionada arriba. Si no lo vendemos, di que no lo tenemos.
     `
 

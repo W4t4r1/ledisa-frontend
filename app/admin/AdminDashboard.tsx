@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { eliminarProducto, guardarProducto, toggleVisibilidadProducto } from './actions'
+import { obtenerSeccionProducto } from '../components/CatalogoInteractivo'
 
 export default function AdminDashboard({ inventarioInicial }: { inventarioInicial: any[] }) {
   const [busqueda, setBusqueda] = useState('')
@@ -137,7 +138,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                       </>
                     ) : (
                       <span className={`px-2 py-0.5 rounded text-xs font-bold ${item.stock > 0 ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200'}`}>
-                        {item.stock} pzs
+                        {item.stock} {['mayolicas_porcelanatos', 'saldos', 'decoraciones'].includes(obtenerSeccionProducto(item)) ? 'pzs' : 'und'}
                       </span>
                     )}
                   </div>
@@ -260,7 +261,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
               <div className="col-span-2 md:col-span-1">
                 <label className="text-xs font-bold text-gray-500 block mb-1">Rendimiento (m² por caja)</label>
                 <input type="number" step="0.01" min="0" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.m2_caja || 0} onChange={e => setForm({...form, m2_caja: parseFloat(e.target.value) || 0})} />
-                <span className="text-[10px] text-gray-400 block mt-1">Dejar en 0 si es por piezas (ej. sanitarios, grifería, listelos)</span>
+                <span className="text-[10px] text-gray-400 block mt-1">Dejar en 0 si es por unidades o piezas (ej. sanitarios, grifería, listelos, fragua)</span>
               </div>
               <div className="col-span-2 md:col-span-1">
                 <label className="text-xs font-bold text-gray-500 block mb-1">Piezas Sueltas (Adicionales)</label>
