@@ -15,6 +15,8 @@ export default function Sidebar() {
     { href: '/admin/calculadora', label: '📐 Calculadora de Obra' },
     { href: '/admin/consultor', label: '🧠 Consultor IA' },
     { href: '/admin/ventas', label: '⚡ Workspace de Ventas' },
+    { href: '/admin/clientes', label: '👥 Gestión de Clientes (CRM)' },
+    { href: '/admin/kardex', label: '📈 Kardex de Inventario' },
   ]
 
   const isActive = (href: string) => {

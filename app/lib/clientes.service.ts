@@ -65,3 +65,54 @@ export async function getClientes(): Promise<Cliente[]> {
 
   return data || []
 }
+
+/**
+ * Actualiza la información de un cliente existente.
+ */
+export async function actualizarCliente(id: string, cliente: Partial<Cliente>): Promise<Cliente> {
+  const { data, error } = await supabase
+    .from('clientes')
+    .update({
+      tipo_documento: cliente.tipo_documento,
+      documento: cliente.documento?.trim(),
+      nombre_razon_social: cliente.nombre_razon_social?.trim(),
+      celular: cliente.celular?.trim() || null,
+      direccion: cliente.direccion?.trim() || null
+    })
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    throw new Error(`Error al actualizar el cliente: ${error.message}`)
+  }
+
+  return data
+}
+
+/**
+ * Obtiene el historial de compras de un cliente específico.
+ */
+export async function getComprasCliente(clienteId: string): Promise<any[]> {
+  const { data, error } = await supabase
+    .from('ventas')
+    .select(`
+      id,
+      codigo_venta,
+      subtotal,
+      descuento,
+      total,
+      metodo_pago,
+      estado,
+      fecha,
+      nota
+    `)
+    .eq('cliente_id', clienteId)
+    .order('fecha', { ascending: false })
+
+  if (error) {
+    throw new Error(`Error al obtener compras del cliente: ${error.message}`)
+  }
+
+  return data || []
+}
