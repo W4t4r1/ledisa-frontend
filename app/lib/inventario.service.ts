@@ -28,7 +28,7 @@ export async function registrarAjusteInventario(ajuste: AjusteStockData): Promis
   // 1. Obtener stock actual
   const { data: producto, error: errFetch } = await supabase
     .from('inventario')
-    .select('stock, piezas_sueltas, nombre')
+    .select('stock, piezas_sueltas, nombre, m2_caja')
     .eq('id', ajuste.producto_id)
     .single()
 
@@ -36,22 +36,42 @@ export async function registrarAjusteInventario(ajuste: AjusteStockData): Promis
     throw new Error(`El producto con ID ${ajuste.producto_id} no existe en el inventario.`)
   }
 
+  const esRecubrimiento = (producto.m2_caja || 0) > 0
+
   // 2. Calcular nuevo stock
   let nuevoStock = producto.stock || 0
   let nuevasPiezas = producto.piezas_sueltas || 0
 
-  if (ajuste.tipo === 'ENTRADA') {
-    nuevoStock += ajuste.cantidad_cajas
-    nuevasPiezas += ajuste.piezas_sueltas
-  } else {
-    // Es SALIDA, validamos que no sea negativo
-    if (nuevoStock < ajuste.cantidad_cajas || nuevasPiezas < ajuste.piezas_sueltas) {
-      throw new Error(
-        `Stock insuficiente para ${producto.nombre}. Stock actual: ${nuevoStock} cjs, ${nuevasPiezas} pzs. Ajuste requerido: ${ajuste.cantidad_cajas} cjs, ${ajuste.piezas_sueltas} pzs.`
-      )
+  if (esRecubrimiento) {
+    if (ajuste.tipo === 'ENTRADA') {
+      nuevoStock += ajuste.cantidad_cajas
+      nuevasPiezas += ajuste.piezas_sueltas
+    } else {
+      // Es SALIDA, validamos que no sea negativo
+      if (nuevoStock < ajuste.cantidad_cajas || nuevasPiezas < ajuste.piezas_sueltas) {
+        throw new Error(
+          `Stock insuficiente para ${producto.nombre}. Stock actual: ${nuevoStock} cjs, ${nuevasPiezas} pzs. Ajuste requerido: ${ajuste.cantidad_cajas} cjs, ${ajuste.piezas_sueltas} pzs.`
+        )
+      }
+      nuevoStock -= ajuste.cantidad_cajas
+      nuevasPiezas -= ajuste.piezas_sueltas
     }
-    nuevoStock -= ajuste.cantidad_cajas
-    nuevasPiezas -= ajuste.piezas_sueltas
+  } else {
+    // Para productos por unidad (sanitarios, griferías, fragua, etc.),
+    // la cantidad de unidades viene en ajuste.piezas_sueltas, y se resta o suma de la columna stock
+    if (ajuste.tipo === 'ENTRADA') {
+      nuevoStock += ajuste.piezas_sueltas
+      nuevasPiezas = 0 // Aseguramos que piezas sueltas quede en 0
+    } else {
+      // Es SALIDA, validamos que no sea negativo
+      if (nuevoStock < ajuste.piezas_sueltas) {
+        throw new Error(
+          `Stock insuficiente para ${producto.nombre}. Stock actual: ${nuevoStock} unidades. Ajuste requerido: ${ajuste.piezas_sueltas} unidades.`
+        )
+      }
+      nuevoStock -= ajuste.piezas_sueltas
+      nuevasPiezas = 0 // Aseguramos que piezas sueltas quede en 0
+    }
   }
 
   // 3. Actualizar la tabla de inventario
@@ -73,7 +93,7 @@ export async function registrarAjusteInventario(ajuste: AjusteStockData): Promis
     .insert({
       producto_id: ajuste.producto_id,
       tipo: ajuste.tipo,
-      cantidad_cajas: ajuste.cantidad_cajas,
+      cantidad_cajas: esRecubrimiento ? ajuste.cantidad_cajas : 0,
       piezas_sueltas: ajuste.piezas_sueltas,
       motivo: ajuste.motivo,
       referencia_id: null

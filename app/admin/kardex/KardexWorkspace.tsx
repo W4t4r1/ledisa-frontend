@@ -126,12 +126,22 @@ export default function KardexWorkspace({ inventario, kardexInicial }: KardexWor
     if (ajusteTipo === 'SALIDA') {
       const stockDisponibleCjs = productoSeleccionado.stock || 0
       const stockDisponiblePzs = productoSeleccionado.piezas_sueltas || 0
+      const esRecubrimiento = (productoSeleccionado.m2_caja || 0) > 0
 
-      if (cantCajas > stockDisponibleCjs || cantPiezas > stockDisponiblePzs) {
-        alert(
-          `⚠️ Stock insuficiente para realizar la salida. Disponible: ${stockDisponibleCjs} cjs, ${stockDisponiblePzs} ${getUnitLabel(productoSeleccionado)}. Solicitado: ${cantCajas} cjs, ${cantPiezas} ${getUnitLabel(productoSeleccionado)}.`
-        )
-        return
+      if (esRecubrimiento) {
+        if (cantCajas > stockDisponibleCjs || cantPiezas > stockDisponiblePzs) {
+          alert(
+            `⚠️ Stock insuficiente para realizar la salida. Disponible: ${stockDisponibleCjs} cjs, ${stockDisponiblePzs} ${getUnitLabel(productoSeleccionado)}. Solicitado: ${cantCajas} cjs, ${cantPiezas} ${getUnitLabel(productoSeleccionado)}.`
+          )
+          return
+        }
+      } else {
+        if (cantPiezas > stockDisponibleCjs) {
+          alert(
+            `⚠️ Stock insuficiente para realizar la salida. Disponible: ${stockDisponibleCjs} ${getUnitLabel(productoSeleccionado)}. Solicitado: ${cantPiezas} ${getUnitLabel(productoSeleccionado)}.`
+          )
+          return
+        }
       }
     }
 

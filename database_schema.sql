@@ -97,6 +97,7 @@ DECLARE
     v_stock_actual INT;
     v_pzs_actual INT;
     v_nombre_prod TEXT;
+    v_m2_caja NUMERIC;
 BEGIN
     -- Determinar prefijo
     IF p_estado = 'COTIZACION' THEN
@@ -122,8 +123,8 @@ BEGIN
         v_subtotal_item := (v_item->>'subtotal')::NUMERIC;
 
         -- Obtener stock actual para validación y alertas
-        SELECT stock, piezas_sueltas, nombre 
-        INTO v_stock_actual, v_pzs_actual, v_nombre_prod
+        SELECT stock, piezas_sueltas, nombre, m2_caja 
+        INTO v_stock_actual, v_pzs_actual, v_nombre_prod, v_m2_caja
         FROM inventario 
         WHERE id = v_producto_id;
 
@@ -133,21 +134,39 @@ BEGIN
 
         -- Si la venta no es solo una cotización (es decir, está PAGADO o ENTREGADO), restamos stock
         IF p_estado IN ('PAGADO', 'ENTREGADO') THEN
-            -- Validar si hay suficiente mercadería
-            IF v_stock_actual < v_cant_cajas OR v_pzs_actual < v_pzs_sueltas THEN
-                RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % cjs, % pzs. Requerido % cjs, % pzs.', 
-                    v_nombre_prod, v_producto_id, v_stock_actual, v_pzs_actual, v_cant_cajas, v_pzs_sueltas;
+            -- Validar si hay suficiente mercadería y descontarla
+            IF v_m2_caja > 0 THEN
+                IF v_stock_actual < v_cant_cajas OR v_pzs_actual < v_pzs_sueltas THEN
+                    RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % cjs, % pzs. Requerido % cjs, % pzs.', 
+                        v_nombre_prod, v_producto_id, v_stock_actual, v_pzs_actual, v_cant_cajas, v_pzs_sueltas;
+                END IF;
+
+                -- Descontar el stock
+                UPDATE inventario 
+                SET stock = stock - v_cant_cajas,
+                    piezas_sueltas = piezas_sueltas - v_pzs_sueltas
+                WHERE id = v_producto_id;
+
+                -- Registrar movimiento de salida en el Kardex
+                INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                VALUES (v_producto_id, 'SALIDA', v_cant_cajas, v_pzs_sueltas, 'VENTA', v_venta_id);
+            ELSE
+                -- Para productos por unidad, v_pzs_sueltas es la cantidad de unidades vendidas, y se resta de stock (que almacena las unidades totales)
+                IF v_stock_actual < v_pzs_sueltas THEN
+                    RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % unidades. Requerido % unidades.', 
+                        v_nombre_prod, v_producto_id, v_stock_actual, v_pzs_sueltas;
+                END IF;
+
+                -- Descontar el stock
+                UPDATE inventario 
+                SET stock = stock - v_pzs_sueltas,
+                    piezas_sueltas = 0 -- Asegurar que piezas sueltas quede en 0
+                WHERE id = v_producto_id;
+
+                -- Registrar movimiento de salida en el Kardex
+                INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                VALUES (v_producto_id, 'SALIDA', 0, v_pzs_sueltas, 'VENTA', v_venta_id);
             END IF;
-
-            -- Descontar el stock
-            UPDATE inventario 
-            SET stock = stock - v_cant_cajas,
-                piezas_sueltas = piezas_sueltas - v_pzs_sueltas
-            WHERE id = v_producto_id;
-
-            -- Registrar movimiento de salida en el Kardex
-            INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
-            VALUES (v_producto_id, 'SALIDA', v_cant_cajas, v_pzs_sueltas, 'VENTA', v_venta_id);
         END IF;
 
         -- Insertar en el detalle de la venta
