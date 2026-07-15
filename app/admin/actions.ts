@@ -27,6 +27,7 @@ export async function guardarProducto(productoBase: any, esEdicion: boolean) {
     nombre: nombreAutogenerado,
     marca: marcaAutogenerada,
     precio: parseFloat(productoBase.precio),
+    costo: parseFloat(productoBase.costo || 0),
     stock: parseInt(productoBase.stock),
     m2_caja: parseFloat(productoBase.m2_caja || 0),
     piezas_sueltas: parseInt(productoBase.piezas_sueltas || 0),

@@ -9,6 +9,7 @@ interface Producto {
   categoria: string
   marca: string
   precio: number
+  costo: number
   stock: number
   m2_caja: number
   piezas_sueltas: number
@@ -20,6 +21,7 @@ interface CartItem {
   cantidad_cajas: number
   piezas_sueltas: number
   precio_unitario: number
+  costo_unitario: number
   piezas_por_caja: number // Divisor para calcular precio de piezas sueltas
   subtotal: number
 }
@@ -119,6 +121,7 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
       cantidad_cajas: producto.m2_caja > 0 ? 1 : 0,
       piezas_sueltas: producto.m2_caja > 0 ? 0 : 1,
       precio_unitario: producto.precio,
+      costo_unitario: producto.costo || 0,
       piezas_por_caja: 6, // Estándar para revestimientos
       subtotal: producto.precio
     }
@@ -200,6 +203,8 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
             cantidad_cajas: item.cantidad_cajas,
             piezas_sueltas: item.piezas_sueltas,
             precio_unitario: item.precio_unitario,
+            costo_unitario: item.costo_unitario,
+            piezas_por_caja: item.piezas_por_caja,
             subtotal: item.subtotal
           }))
         }
@@ -363,8 +368,21 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
                         <div className="flex flex-col">
                           <span className="font-bold text-gray-800 text-sm">{p.nombre}</span>
                           <span className="text-xs text-gray-400 font-mono">Cód: {p.id}</span>
+                          
+                          {/* Costo de Adquisición */}
+                          <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-500">
+                            <span className="font-semibold text-gray-400 uppercase text-[9px]">Costo: S/.</span>
+                            <input 
+                              type="number"
+                              step="0.01"
+                              value={item.costo_unitario}
+                              onChange={e => actualizarItemCarrito(p.id, 'costo_unitario', parseFloat(e.target.value) || 0)}
+                              className="border text-center w-16 p-0.5 rounded text-[11px] text-gray-700 bg-white"
+                            />
+                          </div>
+
                           {esRecubrimiento && (
-                            <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded w-max mt-1">
+                            <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded w-max mt-1.5">
                               Rendimiento: {p.m2_caja} m²/caja
                             </span>
                           )}

@@ -35,6 +35,10 @@ export default function DashboardWorkspace({ inventario, ventas, clientes }: Das
   const totalIngresos = ventasConcretadas.reduce((sum, v) => sum + Number(v.total), 0)
   const totalCotizado = cotizacionesActivas.reduce((sum, v) => sum + Number(v.total), 0)
   
+  // Utilidad y Rentabilidad Neta
+  const gananciaNeta = ventasConcretadas.reduce((sum, v) => sum + (Number(v.total) - Number(v.total_costo || 0)), 0)
+  const rentabilidad = totalIngresos > 0 ? (gananciaNeta / totalIngresos) * 100 : 0
+  
   const ticketPromedio = ventasConcretadas.length > 0 ? totalIngresos / ventasConcretadas.length : 0
 
   // 4. Conversión y Métodos de Pago
@@ -83,7 +87,7 @@ export default function DashboardWorkspace({ inventario, ventas, clientes }: Das
       </div>
 
       {/* FILA 1: KPIs CLAVE */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         
         {/* KPI: CAPITAL EN ALMACÉN */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-blue-500 hover:-translate-y-0.5 transition-all duration-300">
@@ -106,6 +110,18 @@ export default function DashboardWorkspace({ inventario, ventas, clientes }: Das
               <p className="text-[10px] text-green-600 font-semibold mt-1">En {ventasConcretadas.length} operaciones cerradas</p>
             </div>
             <span className="text-2xl bg-green-50 p-2 rounded-lg">💵</span>
+          </div>
+        </div>
+
+        {/* KPI: UTILIDAD NETA */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-emerald-500 hover:-translate-y-0.5 transition-all duration-300">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Utilidad Neta</p>
+              <h3 className="text-2xl font-black text-emerald-700">S/. {gananciaNeta.toFixed(2)}</h3>
+              <p className="text-[10px] text-emerald-600 font-bold mt-1">Rentabilidad: {rentabilidad.toFixed(1)}%</p>
+            </div>
+            <span className="text-2xl bg-emerald-50 p-2 rounded-lg">📈</span>
           </div>
         </div>
 
@@ -235,6 +251,7 @@ export default function DashboardWorkspace({ inventario, ventas, clientes }: Das
                     <th className="p-2.5">Cliente</th>
                     <th className="p-2.5 text-center">Estado</th>
                     <th className="p-2.5 text-right">Total</th>
+                    <th className="p-2.5 text-right">Utilidad</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -250,7 +267,14 @@ export default function DashboardWorkspace({ inventario, ventas, clientes }: Das
                         {v.clientes?.nombre_razon_social || 'Cliente Genérico'}
                       </td>
                       <td className="p-2.5 text-center">{getBadgeEstado(v.estado)}</td>
-                      <td className="p-2.5 text-right font-bold text-[#04558C]">S/. {Number(v.total).toFixed(2)}</td>
+                      <td className="p-2.5 text-right font-bold text-gray-800">S/. {Number(v.total).toFixed(2)}</td>
+                      <td className="p-2.5 text-right font-bold text-emerald-600">
+                        {v.estado !== 'COTIZACION' && v.estado !== 'ANULADO' ? (
+                          `S/. ${(Number(v.total) - Number(v.total_costo || 0)).toFixed(2)}`
+                        ) : (
+                          <span className="text-gray-400 font-normal italic">-</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -5,6 +5,8 @@ export interface ItemVenta {
   cantidad_cajas: number
   piezas_sueltas: number
   precio_unitario: number
+  costo_unitario: number
+  piezas_por_caja: number
   subtotal: number
 }
 

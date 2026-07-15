@@ -10,6 +10,7 @@ interface Venta {
   subtotal: number
   descuento: number
   total: number
+  total_costo: number
   metodo_pago: string
   estado: 'COTIZACION' | 'PAGADO' | 'ENTREGADO' | 'ANULADO'
   nota?: string
@@ -269,6 +270,18 @@ export default function HistorialVentas({ ventasIniciales }: { ventasIniciales: 
                   <span>Total Operación:</span>
                   <span className="text-xl text-[#04558C]">S/. {ventaSeleccionada.total.toFixed(2)}</span>
                 </div>
+                {ventaSeleccionada.estado !== 'COTIZACION' && ventaSeleccionada.estado !== 'ANULADO' && (
+                  <div className="border-t border-dashed pt-1.5 mt-1.5 space-y-1 text-xs">
+                    <div className="flex justify-between text-gray-500">
+                      <span>Costo de Venta:</span>
+                      <span>S/. {(ventaSeleccionada.total_costo || 0).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-emerald-600">
+                      <span>Ganancia Neta:</span>
+                      <span>S/. {(ventaSeleccionada.total - (ventaSeleccionada.total_costo || 0)).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

@@ -15,7 +15,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
   // Estado para guardar temporalmente lo que el usuario escribe
   const [form, setForm] = useState({
     id: '', nombre: '', categoria: 'Porcelanato', marca: '',
-    precio: 0, stock: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '',
+    precio: 0, costo: 0, stock: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '',
     oculto: false
   })
 
@@ -55,11 +55,12 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
         ...producto,
         oculto: !!producto.oculto,
         piezas_sueltas: producto.piezas_sueltas || 0,
-        m2_caja: producto.m2_caja || 0
+        m2_caja: producto.m2_caja || 0,
+        costo: producto.costo || 0
       })
       setEsEdicion(true)
     } else {
-      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, stock: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '', oculto: false })
+      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, costo: 0, stock: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '', oculto: false })
       setEsEdicion(false)
     }
     setMostrarModal(true)
@@ -105,6 +106,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
             <tr className="bg-gray-100 text-gray-600 text-sm uppercase tracking-wider border-b border-gray-200">
               <th className="p-3">ID</th>
               <th className="p-3">Producto</th>
+              <th className="p-3 text-right">Costo</th>
               <th className="p-3 text-right">Precio</th>
               <th className="p-3 text-center">Stock</th>
               <th className="p-3 text-center">Visibilidad</th>
@@ -124,6 +126,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                     {item.color && <span className="ml-2 text-xs bg-gray-200 text-gray-600 px-1 rounded">{item.color}</span>}
                   </div>
                 </td>
+                <td className="p-3 text-right font-medium text-gray-500">S/. {item.costo || '0.00'}</td>
                 <td className="p-3 text-right font-bold text-[#04558C]">S/. {item.precio}</td>
                 <td className="p-3 text-center">
                   <div className="flex flex-col items-center gap-0.5">
@@ -246,8 +249,12 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                 </div>
               </div>
               <div className="col-span-2 md:col-span-1">
-                <label className="text-xs font-bold text-gray-500 block mb-1">Precio (S/.)*</label>
-                <input required type="number" step="0.1" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.precio} onChange={e => setForm({...form, precio: parseFloat(e.target.value) || 0})} />
+                <label className="text-xs font-bold text-gray-500 block mb-1">Costo de Adquisición (S/.)*</label>
+                <input required type="number" step="0.01" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.costo || 0} onChange={e => setForm({...form, costo: parseFloat(e.target.value) || 0})} />
+              </div>
+              <div className="col-span-2 md:col-span-1">
+                <label className="text-xs font-bold text-gray-500 block mb-1">Precio de Venta (S/.)*</label>
+                <input required type="number" step="0.01" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.precio} onChange={e => setForm({...form, precio: parseFloat(e.target.value) || 0})} />
               </div>
               <div className="col-span-2 md:col-span-1">
                 <label className="text-xs font-bold text-gray-500 block mb-1">Stock (Cajas)*</label>
