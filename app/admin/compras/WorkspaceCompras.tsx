@@ -2,7 +2,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { guardarProveedor, buscarProveedor, crearCompra, obtenerDetalleDeCompra } from './actions'
+import { guardarProveedor, buscarProveedor, crearCompra, obtenerDetalleDeCompra, buscarProveedores, buscarDniRucPeru } from './actions'
 import { Proveedor, CompraData, ItemCompra } from '../../lib/compras.service'
 import { obtenerSeccionProducto } from '../../components/CatalogoInteractivo'
 
@@ -41,6 +41,11 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
   // --- 1. CONFIGURACIÓN DEL ESTADO DE PROVEEDORES ---
   const [proveedores, setProveedores] = useState<Proveedor[]>(proveedoresIniciales)
   const [busquedaProv, setBusquedaProv] = useState('')
+  
+  // Estados para búsqueda predictiva de proveedores
+  const [proveedoresSugeridos, setProveedoresSugeridos] = useState<any[]>([])
+  const [mostrarSugerenciasProveedor, setMostrarSugerenciasProveedor] = useState(false)
+  const [consultandoSunat, setConsultandoSunat] = useState(false)
   
   useEffect(() => {
     setProveedores(proveedoresIniciales)
@@ -102,26 +107,61 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
     return 'und'
   }
 
-  // Búsqueda de proveedor en caliente
+  // Búsqueda de proveedor al enviar formulario (Enter)
   const handleBuscarProveedor = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!documentoBusqueda.trim()) return
 
     setCargandoProveedor(true)
     setProveedorNoEncontrado(false)
+    setMostrarSugerenciasProveedor(false)
     try {
-      const res = await buscarProveedor(documentoBusqueda)
-      if (res) {
-        setProveedorSeleccionado(res)
+      const res = await buscarProveedores(documentoBusqueda)
+      if (res && res.length > 0) {
+        const exactMatch = res.find(p => p.documento.trim() === documentoBusqueda.trim())
+        if (exactMatch) {
+          setProveedorSeleccionado(exactMatch)
+          setDocumentoBusqueda(exactMatch.razon_social)
+        } else if (res.length === 1) {
+          setProveedorSeleccionado(res[0])
+          setDocumentoBusqueda(res[0].razon_social)
+        } else {
+          setProveedoresSugeridos(res)
+          setMostrarSugerenciasProveedor(true)
+        }
       } else {
         setProveedorSeleccionado(null)
         setProveedorNoEncontrado(true)
-        setFormProveedor(prev => ({ ...prev, documento: documentoBusqueda, tipo_documento: documentoBusqueda.length === 11 ? 'RUC' : 'DNI' }))
+        setFormProveedor(prev => ({ 
+          ...prev, 
+          documento: /^\d+$/.test(documentoBusqueda) ? documentoBusqueda : '', 
+          tipo_documento: documentoBusqueda.length === 11 ? 'RUC' : 'DNI',
+          razon_social: '',
+          celular: '',
+          direccion: ''
+        }))
       }
     } catch (err: any) {
       alert('❌ Error al buscar proveedor: ' + err.message)
     } finally {
       setCargandoProveedor(false)
+    }
+  }
+
+  // Búsqueda interactiva conforme escribe
+  const handleBuscarProveedorText = async (val: string) => {
+    setDocumentoBusqueda(val)
+    if (val.trim().length >= 3) {
+      try {
+        const res = await buscarProveedores(val)
+        setProveedoresSugeridos(res)
+        setMostrarSugerenciasProveedor(true)
+      } catch (err) {
+        // Silencioso
+      }
+    } else {
+      setProveedoresSugeridos([])
+      setMostrarSugerenciasProveedor(false)
     }
   }
 
@@ -362,22 +402,54 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                   <span>🏢</span> Identificación del Proveedor
                 </h3>
 
-                <form onSubmit={handleBuscarProveedor} className="flex gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="Buscar RUC o DNI del proveedor..."
-                    value={documentoBusqueda}
-                    onChange={e => setDocumentoBusqueda(e.target.value)}
-                    className="flex-1 border border-gray-300 p-2.5 rounded-lg text-gray-900 bg-white focus:outline-none focus:border-[#04558C]"
-                  />
-                  <button 
-                    type="submit" 
-                    disabled={cargandoProveedor}
-                    className="bg-[#04558C] hover:bg-[#033f6b] text-white px-5 py-2.5 rounded-lg font-bold transition-colors disabled:opacity-50 cursor-pointer"
-                  >
-                    {cargandoProveedor ? '🔍 Buscando...' : 'Buscar'}
-                  </button>
-                </form>
+                <div className="relative">
+                  <form onSubmit={handleBuscarProveedor} className="flex gap-2">
+                    <input 
+                      type="text" 
+                      placeholder="Buscar por Razón Social, DNI o RUC del proveedor..."
+                      value={documentoBusqueda}
+                      onChange={e => handleBuscarProveedorText(e.target.value)}
+                      onFocus={() => {
+                        if (documentoBusqueda.trim().length >= 3) {
+                          setMostrarSugerenciasProveedor(true)
+                        }
+                      }}
+                      className="flex-1 border border-gray-300 p-2.5 rounded-lg text-gray-900 bg-white focus:outline-none focus:border-[#04558C]"
+                    />
+                    <button 
+                      type="submit" 
+                      disabled={cargandoProveedor}
+                      className="bg-[#04558C] hover:bg-[#033f6b] text-white px-5 py-2.5 rounded-lg font-bold transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      {cargandoProveedor ? '🔍 Buscando...' : 'Buscar'}
+                    </button>
+                  </form>
+
+                  {/* Listado de sugerencias flotantes de proveedores */}
+                  {mostrarSugerenciasProveedor && proveedoresSugeridos.length > 0 && (
+                    <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-30 max-h-60 overflow-y-auto divide-y text-xs text-gray-900">
+                      {proveedoresSugeridos.map(prov => (
+                        <button
+                          key={prov.id}
+                          type="button"
+                          onClick={() => {
+                            setProveedorSeleccionado(prov)
+                            setDocumentoBusqueda(prov.razon_social)
+                            setMostrarSugerenciasProveedor(false)
+                            setProveedorNoEncontrado(false)
+                          }}
+                          className="w-full text-left p-3 hover:bg-blue-50 transition-colors flex justify-between items-center cursor-pointer"
+                        >
+                          <div>
+                            <p className="font-bold text-gray-800">{prov.razon_social}</p>
+                            <p className="text-[10px] text-gray-400 font-semibold">{prov.tipo_documento}: {prov.documento}</p>
+                          </div>
+                          <span className="text-gray-400 font-bold text-[10px]">SELECCIONAR ➔</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 {/* Proveedor Seleccionado */}
                 {proveedorSeleccionado && (
@@ -871,15 +943,47 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
 
               <div>
                 <label className="text-xs font-bold text-gray-500 block mb-1">Número de Documento*</label>
-                <input
-                  type="text"
-                  required
-                  disabled={esEdicionProv}
-                  value={formProveedor.documento}
-                  onChange={e => setFormProveedor({ ...formProveedor, documento: e.target.value })}
-                  placeholder="Ej: 20601234567"
-                  className="w-full border p-2.5 rounded-lg text-gray-900 bg-white font-semibold disabled:bg-gray-100 focus:outline-none focus:border-[#04558C]"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    disabled={esEdicionProv}
+                    value={formProveedor.documento}
+                    onChange={e => setFormProveedor({ ...formProveedor, documento: e.target.value })}
+                    placeholder="Ej: 20601234567"
+                    className="flex-1 border border-gray-300 p-2.5 rounded-lg text-gray-900 bg-white font-semibold disabled:bg-gray-100 focus:outline-none focus:border-[#04558C]"
+                  />
+                  {!esEdicionProv && (formProveedor.tipo_documento === 'DNI' || formProveedor.tipo_documento === 'RUC') && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const doc = formProveedor.documento.trim()
+                        if (!doc) {
+                          alert('Por favor ingresa el número de documento.')
+                          return
+                        }
+                        setConsultandoSunat(true)
+                        try {
+                          const res = await buscarDniRucPeru(formProveedor.tipo_documento as 'DNI' | 'RUC', doc)
+                          setFormProveedor(prev => ({
+                            ...prev,
+                            razon_social: res.nombre_razon_social,
+                            direccion: res.direccion || prev.direccion
+                          }))
+                          alert(`✅ Autocompletado desde la base de datos de ${formProveedor.tipo_documento === 'DNI' ? 'RENIEC' : 'SUNAT'}.`)
+                        } catch (err: any) {
+                          alert('❌ Error al consultar documento: ' + err.message)
+                        } finally {
+                          setConsultandoSunat(false)
+                        }
+                      }}
+                      disabled={consultandoSunat}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      {consultandoSunat ? '⏳ Consultando...' : '🔍 Reniec/Sunat'}
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div>

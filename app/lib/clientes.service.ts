@@ -116,3 +116,24 @@ export async function getComprasCliente(clienteId: string): Promise<any[]> {
 
   return data || []
 }
+
+/**
+ * Busca clientes por coincidencia de documento o nombre
+ */
+export async function buscarClientesPorFiltro(query: string): Promise<Cliente[]> {
+  const q = query.trim()
+  if (!q) return []
+
+  const { data, error } = await supabase
+    .from('clientes')
+    .select('*')
+    .or(`documento.ilike.%${q}%,nombre_razon_social.ilike.%${q}%`)
+    .order('nombre_razon_social', { ascending: true })
+    .limit(10)
+
+  if (error) {
+    throw new Error(`Error al buscar clientes: ${error.message}`)
+  }
+
+  return data || []
+}

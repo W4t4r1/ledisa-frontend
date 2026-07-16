@@ -53,3 +53,27 @@ export async function obtenerDetalleDeCompra(ventaId: string) {
     throw new Error(error.message)
   }
 }
+
+/**
+ * Consulta RENIEC/SUNAT en caliente con fallback determinista.
+ */
+export async function buscarDniRucPeru(tipo: 'DNI' | 'RUC', numero: string) {
+  try {
+    const { consultarDniRuc } = await import('../../lib/peru-documentos')
+    return await consultarDniRuc(tipo, numero)
+  } catch (error: any) {
+    throw new Error(error.message)
+  }
+}
+
+/**
+ * Búsqueda de clientes por coincidencia de documento o nombre.
+ */
+export async function buscarClientesCRM(query: string) {
+  try {
+    const { buscarClientesPorFiltro } = await import('../../lib/clientes.service')
+    return await buscarClientesPorFiltro(query)
+  } catch (error: any) {
+    throw new Error(error.message)
+  }
+}

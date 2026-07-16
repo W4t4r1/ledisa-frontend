@@ -61,6 +61,27 @@ export async function buscarProveedorPorDocumento(documento: string): Promise<Pr
 }
 
 /**
+ * Busca proveedores por coincidencia de documento o razón social
+ */
+export async function buscarProveedoresPorFiltro(query: string): Promise<Proveedor[]> {
+  const q = query.trim()
+  if (!q) return []
+
+  const { data, error } = await supabase
+    .from('proveedores')
+    .select('*')
+    .or(`documento.ilike.%${q}%,razon_social.ilike.%${q}%`)
+    .order('razon_social', { ascending: true })
+    .limit(10)
+
+  if (error) {
+    throw new Error(`Error al buscar proveedores: ${error.message}`)
+  }
+
+  return data || []
+}
+
+/**
  * Registra un nuevo proveedor en la base de datos.
  */
 export async function crearProveedor(proveedor: Proveedor): Promise<Proveedor> {
