@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { obtenerDetalle } from './actions'
+import ComprobantePrint from '../../components/ComprobantePrint'
 
 interface Venta {
   id: string
@@ -27,6 +28,9 @@ export default function HistorialVentas({ ventasIniciales }: { ventasIniciales: 
   const [ventaSeleccionada, setVentaSeleccionada] = useState<Venta | null>(null)
   const [detalles, setDetalles] = useState<any[] | null>(null)
 
+  // Estado para impresión
+  const [ventaImprimir, setVentaImprimir] = useState<any | null>(null)
+
   // Filtrado en memoria
   const ventasFiltradas = ventasIniciales.filter(v => {
     const term = busqueda.toLowerCase().trim()
@@ -39,6 +43,27 @@ export default function HistorialVentas({ ventasIniciales }: { ventasIniciales: 
 
     return codigoMatch || clienteNombreMatch || clienteDocMatch || metodoMatch
   })
+
+  // Cargar detalles de una venta específica para impresión y dispararla
+  const handleImprimirVenta = async (venta: Venta) => {
+    try {
+      if (ventaSeleccionada?.id === venta.id && detalles) {
+        setVentaImprimir({ ...venta, items: detalles })
+        setTimeout(() => {
+          window.print()
+        }, 150)
+        return
+      }
+
+      const resDetalles = await obtenerDetalle(venta.id)
+      setVentaImprimir({ ...venta, items: resDetalles })
+      setTimeout(() => {
+        window.print()
+      }, 150)
+    } catch (err: any) {
+      alert('❌ Error al cargar comprobante para impresión: ' + err.message)
+    }
+  }
 
   // Cargar detalles de una venta específica
   const handleVerDetalles = (venta: Venta) => {
@@ -132,12 +157,21 @@ export default function HistorialVentas({ ventasIniciales }: { ventasIniciales: 
                   <td className="p-3 text-center">{getBadgeEstado(v.estado)}</td>
                   <td className="p-3 text-right font-bold text-[#04558C]">S/. {v.total.toFixed(2)}</td>
                   <td className="p-3 text-center">
-                    <button 
-                      onClick={() => handleVerDetalles(v)}
-                      className="text-blue-600 hover:text-blue-800 font-bold text-xs bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded transition-colors cursor-pointer"
-                    >
-                      Ver Detalle
-                    </button>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button 
+                        onClick={() => handleVerDetalles(v)}
+                        className="text-blue-600 hover:text-blue-800 font-bold text-xs bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
+                      >
+                        🔎 Detalle
+                      </button>
+                      <button 
+                        onClick={() => handleImprimirVenta(v)}
+                        className="text-gray-700 hover:text-gray-900 font-bold text-xs bg-gray-100 hover:bg-gray-200 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
+                        title="Imprimir comprobante"
+                      >
+                        🖨️ Imprimir
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -285,7 +319,29 @@ export default function HistorialVentas({ ventasIniciales }: { ventasIniciales: 
               </div>
             </div>
 
+            <div className="flex justify-end gap-2 pt-4 mt-6 border-t">
+              <button
+                onClick={() => handleImprimirVenta(ventaSeleccionada)}
+                className="bg-[#04558C] hover:bg-[#033f6b] text-white px-5 py-2.5 rounded-lg font-bold transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+              >
+                🖨️ Imprimir Comprobante
+              </button>
+              <button
+                onClick={() => setVentaSeleccionada(null)}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-lg font-bold transition-colors cursor-pointer text-xs"
+              >
+                ✕ Cerrar
+              </button>
+            </div>
+
           </div>
+        </div>
+      )}
+
+      {/* COMPROBANTE OCULTO PARA IMPRESIÓN */}
+      {ventaImprimir && (
+        <div className="hidden print:block">
+          <ComprobantePrint venta={ventaImprimir} />
         </div>
       )}
 

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { buscarCliente, guardarCliente, crearNuevaVenta, buscarClientes, buscarDniRucPeru } from './actions'
+import ComprobantePrint from '../../components/ComprobantePrint'
 
 interface Producto {
   id: string
@@ -63,6 +64,9 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
   const [clientesSugeridos, setClientesSugeridos] = useState<any[]>([])
   const [mostrarSugerenciasCliente, setMostrarSugerenciasCliente] = useState(false)
   const [consultandoSunat, setConsultandoSunat] = useState(false)
+
+  // Estado para comprobante de éxito e impresión
+  const [ventaExito, setVentaExito] = useState<any | null>(null)
 
   // Filtrar productos sugeridos para el carrito
   const productosSugeridos = productos.filter(p => 
@@ -275,7 +279,37 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
         }
 
         const codigoGenerado = await crearNuevaVenta(payload)
-        alert(`✅ Venta guardada con éxito. Código de Operación: ${codigoGenerado}`)
+        
+        const payloadExito = {
+          codigo_venta: codigoGenerado,
+          fecha: new Date().toISOString(),
+          metodo_pago: metodoPago,
+          subtotal: subtotalVenta,
+          descuento: descuento,
+          total: totalVenta,
+          nota: nota.trim() || undefined,
+          estado: estadoVenta,
+          clientes: clienteSeleccionado ? {
+            tipo_documento: clienteSeleccionado.tipo_documento,
+            documento: clienteSeleccionado.documento,
+            nombre_razon_social: clienteSeleccionado.nombre_razon_social,
+            celular: clienteSeleccionado.celular,
+            direccion: clienteSeleccionado.direccion
+          } : null,
+          items: carrito.map(item => ({
+            producto: {
+              id: item.producto.id,
+              nombre: item.producto.nombre,
+              m2_caja: item.producto.m2_caja
+            },
+            cantidad_cajas: item.cantidad_cajas,
+            piezas_sueltas: item.piezas_sueltas,
+            precio_unitario: item.precio_unitario,
+            piezas_por_caja: item.piezas_por_caja,
+            subtotal: item.subtotal
+          }))
+        }
+        setVentaExito(payloadExito)
         
         // Resetear formulario
         setCarrito([])
@@ -835,6 +869,62 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* --- MODAL DE OPERACIÓN EXITOSA CON IMPRESIÓN --- */}
+      {ventaExito && (
+        <div className="fixed inset-0 bg-black bg-opacity-65 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl text-center space-y-6">
+            <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto text-3xl">
+              {ventaExito.estado === 'COTIZACION' ? '📝' : '✅'}
+            </div>
+            
+            <div>
+              <h3 className="text-xl font-bold text-gray-800">
+                {ventaExito.estado === 'COTIZACION' ? 'Cotización Guardada' : '¡Registro Exitoso!'}
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                El comprobante se generó bajo el código:
+              </p>
+              <p className="text-lg font-black font-mono text-[#04558C] mt-1 bg-gray-50 py-2 rounded">
+                {ventaExito.codigo_venta}
+              </p>
+            </div>
+
+            <div className="border border-gray-100 rounded-lg p-4 space-y-2 text-sm text-gray-600 bg-gray-50/50">
+              <div className="flex justify-between font-semibold">
+                <span>Cliente:</span>
+                <span className="text-gray-800">{ventaExito.clientes?.nombre_razon_social || 'Cliente General'}</span>
+              </div>
+              <div className="flex justify-between font-semibold">
+                <span>Importe Total:</span>
+                <span className="text-gray-800 font-bold">S/. {ventaExito.total.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                onClick={() => window.print()}
+                className="w-full bg-[#04558C] hover:bg-[#033f6b] text-white py-3 px-4 rounded-xl font-bold transition-colors shadow-md text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                🖨️ Imprimir / Guardar PDF
+              </button>
+              <button
+                onClick={() => setVentaExito(null)}
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 px-4 rounded-xl font-bold transition-colors text-sm cursor-pointer"
+              >
+                ✕ Entendido y Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* COMPROBANTE OCULTO PARA IMPRESIÓN */}
+      {ventaExito && (
+        <div className="hidden print:block">
+          <ComprobantePrint venta={ventaExito} />
         </div>
       )}
 
