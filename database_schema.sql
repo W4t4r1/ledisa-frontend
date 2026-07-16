@@ -450,3 +450,178 @@ BEGIN
     RETURN v_codigo_compra;
 END;
 $$ LANGUAGE plpgsql;
+
+
+-- ==========================================
+-- SECCIÓN: CIERRE DE CAJA Y CAJA CHICA
+-- ==========================================
+
+-- 1. TABLA: Sesiones de Caja
+CREATE TABLE IF NOT EXISTS cajas_sesiones (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    fecha_apertura TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    fecha_cierre TIMESTAMP WITH TIME ZONE,
+    monto_apertura NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    monto_cierre_efectivo_calculado NUMERIC(12, 2),
+    monto_cierre_efectivo_real NUMERIC(12, 2),
+    diferencia NUMERIC(12, 2),
+    estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA' CHECK (estado IN ('ABIERTA', 'CERRADA')),
+    total_ventas_efectivo NUMERIC(12, 2) DEFAULT 0.00,
+    total_ventas_tarjeta NUMERIC(12, 2) DEFAULT 0.00,
+    total_ventas_transferencia NUMERIC(12, 2) DEFAULT 0.00,
+    total_ventas_yape NUMERIC(12, 2) DEFAULT 0.00,
+    total_egresos_caja_chica NUMERIC(12, 2) DEFAULT 0.00,
+    total_ingresos_caja_chica NUMERIC(12, 2) DEFAULT 0.00,
+    nota TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cajas_estado ON cajas_sesiones(estado);
+
+-- 2. TABLA: Movimientos de Caja Chica
+CREATE TABLE IF NOT EXISTS caja_chica_movimientos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sesion_id UUID NOT NULL REFERENCES cajas_sesiones(id) ON DELETE CASCADE,
+    tipo VARCHAR(10) NOT NULL CHECK (tipo IN ('INGRESO', 'EGRESO')),
+    monto NUMERIC(12, 2) NOT NULL CHECK (monto > 0),
+    motivo VARCHAR(200) NOT NULL,
+    metodo_pago VARCHAR(50) DEFAULT 'Efectivo',
+    fecha TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cajachica_sesion ON caja_chica_movimientos(sesion_id);
+
+-- 3. ALTERACIÓN: Asociar Ventas a Sesión de Caja
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS sesion_caja_id UUID REFERENCES cajas_sesiones(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ventas_sesion_caja ON ventas(sesion_caja_id);
+
+-- 4. ACTUALIZACIÓN DEL RPC: registrar_venta (Asignación automática de caja activa)
+CREATE OR REPLACE FUNCTION registrar_venta(
+    p_cliente_id UUID,
+    p_subtotal NUMERIC,
+    p_descuento NUMERIC,
+    p_total NUMERIC,
+    p_metodo_pago VARCHAR,
+    p_estado VARCHAR,
+    p_nota TEXT,
+    p_items JSONB
+) RETURNS VARCHAR AS $$
+DECLARE
+    v_venta_id UUID;
+    v_codigo_venta VARCHAR(30);
+    v_prefix VARCHAR(2);
+    v_item JSONB;
+    v_producto_id VARCHAR(100);
+    v_cant_cajas INT;
+    v_pzs_sueltas INT;
+    v_precio_unit NUMERIC;
+    v_costo_unit NUMERIC;
+    v_pzs_por_caja INT;
+    v_subtotal_item NUMERIC;
+    v_costo_item NUMERIC;
+    v_total_costo NUMERIC := 0.00;
+    v_stock_actual INT;
+    v_pzs_actual INT;
+    v_nombre_prod TEXT;
+    v_m2_caja NUMERIC;
+    v_costo_prod NUMERIC;
+    v_sesion_caja_id UUID;
+BEGIN
+    -- Buscar sesión de caja abierta activa
+    SELECT id INTO v_sesion_caja_id 
+    FROM cajas_sesiones 
+    WHERE estado = 'ABIERTA' 
+    ORDER BY fecha_apertura DESC 
+    LIMIT 1;
+
+    IF p_estado = 'COTIZACION' THEN
+        v_prefix := 'C-';
+    ELSE
+        v_prefix := 'V-';
+    END IF;
+
+    v_codigo_venta := v_prefix || TO_CHAR(NOW(), 'YYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 10000)::TEXT, 4, '0');
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+        v_producto_id := (v_item->>'producto_id');
+        v_cant_cajas := COALESCE((v_item->>'cantidad_cajas')::INT, 0);
+        v_pzs_sueltas := COALESCE((v_item->>'piezas_sueltas')::INT, 0);
+        v_pzs_por_caja := COALESCE((v_item->>'piezas_por_caja')::INT, 6);
+
+        SELECT stock, piezas_sueltas, nombre, m2_caja, costo
+        INTO v_stock_actual, v_pzs_actual, v_nombre_prod, v_m2_caja, v_costo_prod
+        FROM inventario
+        WHERE id = v_producto_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'El producto con código % no existe en el inventario.', v_producto_id;
+        END IF;
+
+        v_costo_unit := COALESCE((v_item->>'costo_unitario')::NUMERIC, v_costo_prod);
+
+        IF v_m2_caja > 0 THEN
+            v_costo_item := ((v_cant_cajas * v_m2_caja) + (v_pzs_sueltas * (v_m2_caja / v_pzs_por_caja))) * v_costo_unit;
+        ELSE
+            v_costo_item := v_pzs_sueltas * v_costo_unit;
+        END IF;
+
+        v_total_costo := v_total_costo + v_costo_item;
+    END LOOP;
+
+    -- Registrar la venta vinculando la sesion_caja_id
+    INSERT INTO ventas (codigo_venta, cliente_id, subtotal, descuento, total, total_costo, metodo_pago, estado, nota, sesion_caja_id)
+    VALUES (v_codigo_venta, p_cliente_id, p_subtotal, p_descuento, p_total, v_total_costo, p_metodo_pago, p_estado, p_nota, v_sesion_caja_id)
+    RETURNING id INTO v_venta_id;
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+        v_producto_id := (v_item->>'producto_id');
+        v_cant_cajas := COALESCE((v_item->>'cantidad_cajas')::INT, 0);
+        v_pzs_sueltas := COALESCE((v_item->>'piezas_sueltas')::INT, 0);
+        v_precio_unit := (v_item->>'precio_unitario')::NUMERIC;
+        v_subtotal_item := (v_item->>'subtotal')::NUMERIC;
+
+        SELECT stock, piezas_sueltas, nombre, m2_caja, costo
+        INTO v_stock_actual, v_pzs_actual, v_nombre_prod, v_m2_caja, v_costo_prod
+        FROM inventario
+        WHERE id = v_producto_id;
+
+        v_costo_unit := COALESCE((v_item->>'costo_unitario')::NUMERIC, v_costo_prod);
+
+        IF p_estado IN ('PAGADO', 'ENTREGADO') THEN
+            IF v_m2_caja > 0 THEN
+                IF v_stock_actual < v_cant_cajas OR v_pzs_actual < v_pzs_sueltas THEN
+                    RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % cjs, % pzs. Requerido % cjs, % pzs.', 
+                        v_nombre_prod, v_producto_id, v_stock_actual, v_pzs_actual, v_cant_cajas, v_pzs_sueltas;
+                END IF;
+
+                UPDATE inventario 
+                SET stock = stock - v_cant_cajas,
+                    piezas_sueltas = piezas_sueltas - v_pzs_sueltas
+                WHERE id = v_producto_id;
+
+                INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                VALUES (v_producto_id, 'SALIDA', v_cant_cajas, v_pzs_sueltas, 'VENTA', v_venta_id);
+            ELSE
+                IF v_stock_actual < v_pzs_sueltas THEN
+                    RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % unidades. Requerido % unidades.', 
+                        v_nombre_prod, v_producto_id, v_stock_actual, v_pzs_sueltas;
+                END IF;
+
+                UPDATE inventario 
+                SET stock = stock - v_pzs_sueltas,
+                    piezas_sueltas = 0
+                WHERE id = v_producto_id;
+
+                INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                VALUES (v_producto_id, 'SALIDA', 0, v_pzs_sueltas, 'VENTA', v_venta_id);
+            END IF;
+        END IF;
+
+        INSERT INTO ventas_detalle (venta_id, producto_id, cantidad_cajas, piezas_sueltas, precio_unitario, costo_unitario, subtotal)
+        VALUES (v_venta_id, v_producto_id, v_cant_cajas, v_pzs_sueltas, v_precio_unit, v_costo_unit, v_subtotal_item);
+
+    END LOOP;
+
+    RETURN v_codigo_venta;
+END;
+$$ LANGUAGE plpgsql;

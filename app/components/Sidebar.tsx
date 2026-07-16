@@ -18,6 +18,7 @@ export default function Sidebar() {
     { href: '/admin/clientes', label: '👥 Gestión de Clientes (CRM)' },
     { href: '/admin/kardex', label: '📈 Kardex de Inventario' },
     { href: '/admin/compras', label: '🚚 Compras y Proveedores' },
+    { href: '/admin/caja', label: '💵 Cierre de Caja y Gastos' },
   ]
 
   const isActive = (href: string) => {
