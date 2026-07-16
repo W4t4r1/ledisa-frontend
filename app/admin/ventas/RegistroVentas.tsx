@@ -24,6 +24,7 @@ interface CartItem {
   costo_unitario: number
   piezas_por_caja: number // Divisor para calcular precio de piezas sueltas
   subtotal: number
+  m2_solicitados: number // M2 solicitados/cobrados
 }
 
 export default function RegistroVentas({ productos }: { productos: Producto[] }) {
@@ -123,6 +124,7 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
       precio_unitario: producto.precio,
       costo_unitario: producto.costo || 0,
       piezas_por_caja: 6, // Estándar para revestimientos
+      m2_solicitados: producto.m2_caja > 0 ? producto.m2_caja : 1,
       subtotal: producto.m2_caja > 0 ? parseFloat((producto.m2_caja * producto.precio).toFixed(2)) : producto.precio
     }
 
@@ -138,14 +140,19 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
 
       const temp = { ...item, [campo]: valor }
       
+      // Si cambian cajas o piezas manualmente, recalculamos m2_solicitados al valor físico
+      if (campo === 'cantidad_cajas' || campo === 'piezas_sueltas' || campo === 'piezas_por_caja') {
+        if (temp.producto.m2_caja > 0) {
+          temp.m2_solicitados = (temp.cantidad_cajas * temp.producto.m2_caja) + (temp.piezas_sueltas * (temp.producto.m2_caja / (temp.piezas_por_caja || 6)))
+          temp.m2_solicitados = parseFloat(temp.m2_solicitados.toFixed(2))
+        }
+      }
+
       // Calcular subtotal
       let sub = 0
       if (temp.producto.m2_caja > 0) {
-        // Para revestimientos: total de m2 (cajas * m2_caja + piezas * (m2_caja / piezas_por_caja)) * precio_unitario (que es por m2)
-        const totalM2 = (temp.cantidad_cajas * temp.producto.m2_caja) + (temp.piezas_sueltas * (temp.producto.m2_caja / (temp.piezas_por_caja || 6)))
-        sub = totalM2 * temp.precio_unitario
+        sub = temp.m2_solicitados * temp.precio_unitario
       } else {
-        // Para sanitarios / griferías / etc: stock_directo (usamos piezas_sueltas como cantidad de unidades)
         sub = temp.piezas_sueltas * temp.precio_unitario
       }
 
@@ -154,18 +161,21 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
     }))
   }
 
-  // Actualizar ambas cantidades calculadas por m2
-  const actualizarCantidadesM2 = (id: string, cajas: number, piezas: number) => {
+  // Actualizar cantidades calculadas por m2 solicitado
+  const actualizarCantidadesM2 = (id: string, m2Val: number, cajas: number, piezas: number) => {
     setCarrito(carrito.map(item => {
       if (item.producto.id !== id) return item
 
-      const temp = { ...item, cantidad_cajas: cajas, piezas_sueltas: piezas }
+      const temp = { 
+        ...item, 
+        cantidad_cajas: cajas, 
+        piezas_sueltas: piezas,
+        m2_solicitados: m2Val 
+      }
       
-      // Calcular subtotal
       let sub = 0
       if (temp.producto.m2_caja > 0) {
-        const totalM2 = (cajas * temp.producto.m2_caja) + (piezas * (temp.producto.m2_caja / (temp.piezas_por_caja || 6)))
-        sub = totalM2 * temp.precio_unitario
+        sub = m2Val * temp.precio_unitario
       } else {
         sub = piezas * temp.precio_unitario
       }
@@ -421,12 +431,12 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
                                   <label className="text-[9px] font-bold text-[#04558C] uppercase">M² Req.</label>
                                   <input 
                                     type="number" 
-                                    step="0.01"
+                                    step="any"
                                     min="0"
                                     placeholder="Ej: 7"
-                                    value={parseFloat(((item.cantidad_cajas * p.m2_caja) + (item.piezas_sueltas * (p.m2_caja / (item.piezas_por_caja || 6)))).toFixed(2)) || ''}
+                                    value={item.m2_solicitados !== undefined ? item.m2_solicitados : ''}
                                     onChange={e => {
-                                      const m2Val = parseFloat(e.target.value) || 0
+                                      const m2Val = e.target.value === '' ? 0 : parseFloat(e.target.value)
                                       if (m2Val >= 0) {
                                         const m2Caja = p.m2_caja
                                         const piezasCaja = item.piezas_por_caja || 6
@@ -434,7 +444,7 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
                                         const restoM2 = m2Val - (cajas * m2Caja)
                                         const areaPieza = m2Caja / piezasCaja
                                         const piezas = Math.floor(restoM2 / areaPieza)
-                                        actualizarCantidadesM2(p.id, cajas, piezas)
+                                        actualizarCantidadesM2(p.id, m2Val, cajas, piezas)
                                       }
                                     }}
                                     className="border text-center w-16 p-1 rounded text-sm text-gray-900 bg-blue-50 border-blue-200 focus:border-[#04558C] focus:outline-none font-bold"
