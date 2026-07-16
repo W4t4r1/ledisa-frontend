@@ -198,6 +198,27 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
     }))
   }
 
+  // Actualizar ambas cantidades calculadas por m2
+  const actualizarCantidadesM2 = (id: string, cajas: number, piezas: number) => {
+    setCarrito(carrito.map(item => {
+      if (item.producto.id !== id) return item
+
+      const temp = { ...item, cantidad_cajas: cajas, piezas_sueltas: piezas }
+      
+      // Calcular subtotal de compra
+      let sub = 0
+      if (temp.producto.m2_caja > 0) {
+        const totalM2 = (cajas * temp.producto.m2_caja) + (piezas * (temp.producto.m2_caja / (temp.piezas_por_caja || 6)))
+        sub = totalM2 * temp.costo_unitario
+      } else {
+        sub = piezas * temp.costo_unitario
+      }
+
+      temp.subtotal = parseFloat(sub.toFixed(2))
+      return temp
+    }))
+  }
+
   const quitarDelCarrito = (id: string) => {
     setCarrito(carrito.filter(item => item.producto.id !== id))
   }
@@ -453,8 +474,8 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                 ) : (
                   <div className="space-y-4">
                     <div className="hidden md:grid grid-cols-12 text-xs font-bold text-gray-400 uppercase pb-2 border-b">
-                      <div className="col-span-5">Producto</div>
-                      <div className="col-span-3 text-center">Cantidades</div>
+                      <div className="col-span-4">Producto</div>
+                      <div className="col-span-4 text-center">Cantidades</div>
                       <div className="col-span-2 text-right">Costo Compra</div>
                       <div className="col-span-2 text-right">Subtotal</div>
                     </div>
@@ -468,7 +489,7 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                           <div key={p.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-0 py-4 items-center text-xs">
                             
                             {/* Columna Producto */}
-                            <div className="col-span-5 flex flex-col">
+                            <div className="col-span-4 flex flex-col">
                               <span className="font-bold text-gray-800 text-sm">{p.nombre}</span>
                               <span className="text-[10px] text-gray-400 font-mono">Cód: {p.id} {p.marca ? `| Marca: ${p.marca}` : ''}</span>
                               {esRecubrimiento && (
@@ -479,11 +500,38 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                             </div>
 
                             {/* Columna Cantidades */}
-                            <div className="col-span-3">
+                            <div className="col-span-4">
                               <div className="flex flex-col gap-1 items-center">
                                 {esRecubrimiento ? (
                                   <>
                                     <div className="flex items-center gap-1.5">
+                                      {/* Metro Cuadrado Solicitado */}
+                                      <div className="flex flex-col items-center">
+                                        <label className="text-[9px] font-bold text-[#04558C] uppercase">M² Req.</label>
+                                        <input 
+                                          type="number" 
+                                          step="0.01"
+                                          min="0"
+                                          placeholder="Ej: 10"
+                                          value={parseFloat(((item.cantidad_cajas * p.m2_caja) + (item.piezas_sueltas * (p.m2_caja / (item.piezas_por_caja || 6)))).toFixed(2)) || ''}
+                                          onChange={e => {
+                                            const m2Val = parseFloat(e.target.value) || 0
+                                            if (m2Val >= 0) {
+                                              const m2Caja = p.m2_caja
+                                              const piezasCaja = item.piezas_por_caja || 6
+                                              const cajas = Math.floor(m2Val / m2Caja)
+                                              const restoM2 = m2Val - (cajas * m2Caja)
+                                              const areaPieza = m2Caja / piezasCaja
+                                              const piezas = Math.floor(restoM2 / areaPieza)
+                                              actualizarCantidadesM2(p.id, cajas, piezas)
+                                            }
+                                          }}
+                                          className="border text-center w-16 p-1 rounded text-sm text-gray-900 bg-blue-50 border-blue-200 focus:border-[#04558C] focus:outline-none font-bold"
+                                        />
+                                      </div>
+
+                                      <span className="text-gray-400 mt-3 text-xs">➔</span>
+
                                       <div className="flex flex-col items-center">
                                         <label className="text-[9px] font-bold text-gray-400 uppercase">Cajas</label>
                                         <input 
@@ -491,7 +539,7 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                                           min="0"
                                           value={item.cantidad_cajas}
                                           onChange={e => actualizarItemCarrito(p.id, 'cantidad_cajas', parseInt(e.target.value) || 0)}
-                                          className="border text-center w-14 p-1 rounded text-sm text-gray-900 bg-white"
+                                          className="border text-center w-12 p-1 rounded text-xs text-gray-900 bg-white"
                                         />
                                       </div>
                                       <span className="text-gray-400 mt-3">+</span>
@@ -502,7 +550,7 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                                           min="0"
                                           value={item.piezas_sueltas}
                                           onChange={e => actualizarItemCarrito(p.id, 'piezas_sueltas', parseInt(e.target.value) || 0)}
-                                          className="border text-center w-14 p-1 rounded text-sm text-gray-900 bg-white"
+                                          className="border text-center w-12 p-1 rounded text-xs text-gray-900 bg-white"
                                         />
                                       </div>
                                     </div>
