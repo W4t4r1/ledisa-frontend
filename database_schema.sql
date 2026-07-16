@@ -255,7 +255,7 @@ BEGIN
         v_costo_unit := COALESCE((v_item->>'costo_unitario')::NUMERIC, v_costo_prod);
 
         IF v_m2_caja > 0 THEN
-            v_costo_item := (v_cant_cajas * v_costo_unit) + (v_pzs_sueltas * (v_costo_unit / v_pzs_por_caja));
+            v_costo_item := ((v_cant_cajas * v_m2_caja) + (v_pzs_sueltas * (v_m2_caja / v_pzs_por_caja))) * v_costo_unit;
         ELSE
             v_costo_item := v_pzs_sueltas * v_costo_unit;
         END IF;
@@ -321,5 +321,132 @@ BEGIN
     END LOOP;
 
     RETURN v_codigo_venta;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- ==========================================
+-- SECCIÓN: COMPRAS Y PROVEEDORES
+-- ==========================================
+
+-- 1. TABLA: Proveedores
+CREATE TABLE IF NOT EXISTS proveedores (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tipo_documento VARCHAR(10) NOT NULL CHECK (tipo_documento IN ('DNI', 'RUC', 'CE', 'OTROS')),
+    documento VARCHAR(20) UNIQUE NOT NULL,
+    razon_social VARCHAR(150) NOT NULL,
+    celular VARCHAR(20),
+    direccion TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_proveedores_doc ON proveedores(documento);
+
+-- 2. TABLA: Compras
+CREATE TABLE IF NOT EXISTS compras (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    codigo_compra VARCHAR(30) UNIQUE NOT NULL, -- Ej: COM-260715-0132
+    proveedor_id UUID REFERENCES proveedores(id) ON DELETE SET NULL,
+    numero_factura VARCHAR(50) NOT NULL,
+    total NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    metodo_pago VARCHAR(50) CHECK (metodo_pago IN ('Efectivo', 'Yape/Plin', 'Transferencia BCP', 'Transferencia Interbancaria', 'Tarjeta Credito/Debito', 'Credito', 'Sin Especificar')),
+    nota TEXT,
+    fecha TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_compras_codigo ON compras(codigo_compra);
+CREATE INDEX IF NOT EXISTS idx_compras_fecha ON compras(fecha);
+
+-- 3. TABLA: Detalle de Compras
+CREATE TABLE IF NOT EXISTS compras_detalle (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    compra_id UUID NOT NULL REFERENCES compras(id) ON DELETE CASCADE,
+    producto_id VARCHAR(100) NOT NULL REFERENCES inventario(id),
+    cantidad_cajas INT NOT NULL DEFAULT 0,
+    piezas_sueltas INT NOT NULL DEFAULT 0,
+    costo_unitario NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_compras_detalle_compra ON compras_detalle(compra_id);
+
+-- 4. FUNCIÓN RPC: registrar_compra (Transaccional)
+CREATE OR REPLACE FUNCTION registrar_compra(
+    p_proveedor_id UUID,
+    p_numero_factura VARCHAR,
+    p_total NUMERIC,
+    p_metodo_pago VARCHAR,
+    p_nota TEXT,
+    p_items JSONB -- Formato: [{"producto_id": "P01", "cantidad_cajas": 10, "piezas_sueltas": 0, "costo_unitario": 28.5, "subtotal": 285.0}]
+) RETURNS VARCHAR AS $$
+DECLARE
+    v_compra_id UUID;
+    v_codigo_compra VARCHAR(30);
+    v_item JSONB;
+    v_producto_id VARCHAR(100);
+    v_cant_cajas INT;
+    v_pzs_sueltas INT;
+    v_costo_unit NUMERIC;
+    v_subtotal_item NUMERIC;
+    v_stock_actual INT;
+    v_pzs_actual INT;
+    v_m2_caja NUMERIC;
+BEGIN
+    -- Generar código correlativo de compra
+    v_codigo_compra := 'COM-' || TO_CHAR(NOW(), 'YYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 10000)::TEXT, 4, '0');
+
+    -- Insertar en cabecera de compras
+    INSERT INTO compras (codigo_compra, proveedor_id, numero_factura, total, metodo_pago, nota)
+    VALUES (v_codigo_compra, p_proveedor_id, p_numero_factura, p_total, p_metodo_pago, p_nota)
+    RETURNING id INTO v_compra_id;
+
+    -- Iterar sobre los productos comprados
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+        v_producto_id := (v_item->>'producto_id');
+        v_cant_cajas := COALESCE((v_item->>'cantidad_cajas')::INT, 0);
+        v_pzs_sueltas := COALESCE((v_item->>'piezas_sueltas')::INT, 0);
+        v_costo_unit := (v_item->>'costo_unitario')::NUMERIC;
+        v_subtotal_item := (v_item->>'subtotal')::NUMERIC;
+
+        -- Validar producto en inventario
+        SELECT stock, piezas_sueltas, m2_caja INTO v_stock_actual, v_pzs_actual, v_m2_caja
+        FROM inventario 
+        WHERE id = v_producto_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'El producto con código % no existe en el inventario.', v_producto_id;
+        END IF;
+
+        -- 1. Incrementar el stock y actualizar costo del catálogo
+        IF v_m2_caja > 0 THEN
+            UPDATE inventario 
+            SET stock = stock + v_cant_cajas,
+                piezas_sueltas = piezas_sueltas + v_pzs_sueltas,
+                costo = v_costo_unit
+            WHERE id = v_producto_id;
+
+            -- 2. Registrar movimiento de entrada en el Kardex
+            INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+            VALUES (v_producto_id, 'ENTRADA', v_cant_cajas, v_pzs_sueltas, 'COMPRA', v_compra_id);
+        ELSE
+            -- Si es por unidades sueltas, sumamos directamente a stock (que almacena las unidades físicas)
+            UPDATE inventario 
+            SET stock = stock + v_pzs_sueltas,
+                costo = v_costo_unit
+            WHERE id = v_producto_id;
+
+            -- Registrar movimiento de entrada en el Kardex
+            INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+            VALUES (v_producto_id, 'ENTRADA', 0, v_pzs_sueltas, 'COMPRA', v_compra_id);
+        END IF;
+
+        -- 3. Insertar detalle de compra
+        INSERT INTO compras_detalle (compra_id, producto_id, cantidad_cajas, piezas_sueltas, costo_unitario, subtotal)
+        VALUES (v_compra_id, v_producto_id, v_cant_cajas, v_pzs_sueltas, v_costo_unit, v_subtotal_item);
+
+    END LOOP;
+
+    RETURN v_codigo_compra;
 END;
 $$ LANGUAGE plpgsql;

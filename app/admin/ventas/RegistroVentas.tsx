@@ -123,7 +123,7 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
       precio_unitario: producto.precio,
       costo_unitario: producto.costo || 0,
       piezas_por_caja: 6, // Estándar para revestimientos
-      subtotal: producto.precio
+      subtotal: producto.m2_caja > 0 ? parseFloat((producto.m2_caja * producto.precio).toFixed(2)) : producto.precio
     }
 
     setCarrito([...carrito, nuevoItem])
@@ -141,9 +141,9 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
       // Calcular subtotal
       let sub = 0
       if (temp.producto.m2_caja > 0) {
-        // Para revestimientos: cajas enteras * precio + piezas * (precio / piezas por caja)
-        const precioPieza = temp.precio_unitario / (temp.piezas_por_caja || 6)
-        sub = (temp.cantidad_cajas * temp.precio_unitario) + (temp.piezas_sueltas * precioPieza)
+        // Para revestimientos: total de m2 (cajas * m2_caja + piezas * (m2_caja / piezas_por_caja)) * precio_unitario (que es por m2)
+        const totalM2 = (temp.cantidad_cajas * temp.producto.m2_caja) + (temp.piezas_sueltas * (temp.producto.m2_caja / (temp.piezas_por_caja || 6)))
+        sub = totalM2 * temp.precio_unitario
       } else {
         // Para sanitarios / griferías / etc: stock_directo (usamos piezas_sueltas como cantidad de unidades)
         sub = temp.piezas_sueltas * temp.precio_unitario

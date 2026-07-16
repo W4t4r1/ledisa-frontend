@@ -14,7 +14,15 @@ export default function DashboardWorkspace({ inventario, ventas, clientes }: Das
 
   // 1. Inventario
   const totalProductos = inventario.length
-  const capitalTotal = inventario.reduce((suma, item) => suma + (item.precio * item.stock), 0)
+  const capitalTotal = inventario.reduce((suma, item) => {
+    const valorUnitario = item.costo || item.precio || 0
+    if (item.m2_caja > 0) {
+      const totalM2 = (item.stock * item.m2_caja) + (item.piezas_sueltas * (item.m2_caja / 6))
+      return suma + (totalM2 * valorUnitario)
+    } else {
+      return suma + (item.stock * valorUnitario)
+    }
+  }, 0)
   const productosAgotados = inventario.filter(item => item.stock === 0)
   const productosBajoStock = inventario.filter(item => item.stock > 0 && item.stock <= 5)
 
