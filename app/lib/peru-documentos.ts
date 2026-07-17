@@ -1,7 +1,10 @@
 /**
  * Consulta de DNI (RENIEC) o RUC (SUNAT) en Perú.
- * Soporta consulta en vivo usando eldni.com como fuente gratuita para DNI y RUC 10,
- * y api.net.pe para RUC 20 (Empresas), con soporte para pruebas/demos.
+ * Soporta:
+ * 1. Token oficial de peruapi.com mediante PERU_API_KEY o APIS_TOKEN (Recomendado y activo para DNI y RUC en producción).
+ * 2. Token oficial de apis.net.pe (Solo RUC).
+ * 3. Consulta en vivo usando eldni.com como fuente gratuita alternativa para DNI y RUC 10.
+ * 4. Fallback determinista para números de prueba/demo.
  */
 export async function consultarDniRuc(tipo: 'DNI' | 'RUC', numero: string) {
   const cleanNum = numero.replace(/\D/g, '')
@@ -35,7 +38,72 @@ export async function consultarDniRuc(tipo: 'DNI' | 'RUC', numero: string) {
     }
   }
 
-  // 2. INTENTAR CONSULTA A ELDNI.COM (DNI Y RUC 10)
+  // 2. INTENTAR CONSULTA OFICIAL MEDIANTE PROVEEDORES CONFIGURADOS (APIS_TOKEN o PERU_API_KEY)
+  const tokenOficial = process.env.PERU_API_KEY || process.env.APIS_TOKEN
+  if (tokenOficial) {
+    // 2.1 Intentar con peruapi.com (Recomendado, DNI y RUC activos de forma gratuita)
+    try {
+      const url = tipo === 'DNI'
+        ? `https://peruapi.com/api/dni/${cleanNum}`
+        : `https://peruapi.com/api/ruc/${cleanNum}`
+
+      const res = await fetch(url, {
+        headers: {
+          'X-API-KEY': tokenOficial,
+          'Accept': 'application/json'
+        }
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        const nombre = data.razon_social || data.razonSocial || data.nombre_completo || data.cliente || (data.nombres ? `${data.nombres} ${data.apellido_paterno || ''} ${data.apellido_materno || ''}`.trim() : '')
+        if (nombre) {
+          return {
+            documento: cleanNum,
+            nombre_razon_social: nombre.trim().toUpperCase(),
+            direccion: data.direccion || ''
+          }
+        }
+      }
+    } catch (e) {
+      // Continuar al siguiente proveedor si falla
+    }
+
+    // 2.2 Intentar con apis.net.pe (Solo RUC, ya que DNI está descontinuado para cuentas públicas)
+    try {
+      const url = tipo === 'DNI'
+        ? `https://api.apis.net.pe/v2/reniec/dni?numero=${cleanNum}`
+        : `https://api.apis.net.pe/v2/sunat/ruc?numero=${cleanNum}`
+
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${tokenOficial}`,
+          'Accept': 'application/json'
+        }
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        if (tipo === 'DNI' && data.nombres) {
+          return {
+            documento: cleanNum,
+            nombre_razon_social: `${data.nombres} ${data.apellidoPaterno} ${data.apellidoMaterno}`.toUpperCase(),
+            direccion: data.direccion || ''
+          }
+        } else if (tipo === 'RUC' && data.razonSocial) {
+          return {
+            documento: cleanNum,
+            nombre_razon_social: data.razonSocial.toUpperCase(),
+            direccion: data.direccion || ''
+          }
+        }
+      }
+    } catch (e) {
+      // Continuar
+    }
+  }
+
+  // 3. INTENTAR CONSULTA GRATUITA A ELDNI.COM (DNI Y RUC 10)
   const esRuc10 = tipo === 'RUC' && cleanNum.startsWith('10')
   if (tipo === 'DNI' || esRuc10) {
     try {
@@ -99,7 +167,7 @@ export async function consultarDniRuc(tipo: 'DNI' | 'RUC', numero: string) {
     }
   }
 
-  // 3. INTENTAR API SECUNDARIA (API.NET.PE - Útil para RUC 20 de empresas)
+  // 4. INTENTAR CON LA API SECUNDARIA GRATUITA (API.NET.PE - Útil para RUC 20 de empresas)
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 2000)
