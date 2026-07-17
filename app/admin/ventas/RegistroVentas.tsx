@@ -799,10 +799,15 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
                         setConsultandoSunat(true)
                         try {
                           const res = await buscarDniRucPeru(formCliente.tipo_documento as 'DNI' | 'RUC', doc)
+                          if (!res.success || !res.data) {
+                            alert('❌ Error al consultar documento: ' + (res.error || 'No se encontraron datos.'))
+                            return
+                          }
+                          const data = res.data
                           setFormCliente(prev => ({
                             ...prev,
-                            nombre_razon_social: res.nombre_razon_social,
-                            direccion: res.direccion || prev.direccion
+                            nombre_razon_social: data.nombre_razon_social,
+                            direccion: data.direccion || prev.direccion
                           }))
                           alert(`✅ Autocompletado desde la base de datos de ${formCliente.tipo_documento === 'DNI' ? 'RENIEC' : 'SUNAT'}.`)
                         } catch (err: any) {

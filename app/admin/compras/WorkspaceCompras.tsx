@@ -965,10 +965,15 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                         setConsultandoSunat(true)
                         try {
                           const res = await buscarDniRucPeru(formProveedor.tipo_documento as 'DNI' | 'RUC', doc)
+                          if (!res.success || !res.data) {
+                            alert('❌ Error al consultar documento: ' + (res.error || 'No se encontraron datos.'))
+                            return
+                          }
+                          const data = res.data
                           setFormProveedor(prev => ({
                             ...prev,
-                            razon_social: res.nombre_razon_social,
-                            direccion: res.direccion || prev.direccion
+                            razon_social: data.nombre_razon_social,
+                            direccion: data.direccion || prev.direccion
                           }))
                           alert(`✅ Autocompletado desde la base de datos de ${formProveedor.tipo_documento === 'DNI' ? 'RENIEC' : 'SUNAT'}.`)
                         } catch (err: any) {

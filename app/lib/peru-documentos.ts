@@ -1,5 +1,7 @@
 /**
- * Consulta de DNI (RENIEC) o RUC (SUNAT) en Perú con fallback determinista.
+ * Consulta de DNI (RENIEC) o RUC (SUNAT) en Perú.
+ * Soporta consulta en vivo usando eldni.com como fuente gratuita para DNI y RUC 10,
+ * y api.net.pe para RUC 20 (Empresas), con soporte para pruebas/demos.
  */
 export async function consultarDniRuc(tipo: 'DNI' | 'RUC', numero: string) {
   const cleanNum = numero.replace(/\D/g, '')
@@ -10,15 +12,98 @@ export async function consultarDniRuc(tipo: 'DNI' | 'RUC', numero: string) {
     throw new Error('El RUC debe tener exactamente 11 dígitos.')
   }
 
-  // 1. Intentar consulta a API gratuita y abierta (sin token obligatorio para pruebas rápidas)
-  let apiSucceeded = false
-  let apiResult: any = null
+  // 1. ¿ES UN DOCUMENTO DE PRUEBA / DEMOSTRACIÓN?
+  const esDemo = cleanNum === '12345678' || cleanNum === '20123456789' || cleanNum.startsWith('000') || cleanNum.startsWith('999')
+  if (esDemo) {
+    const hash = Array.from(cleanNum).reduce((acc, char) => acc + Number(char), 0)
+    if (tipo === 'DNI') {
+      const nombres = ['JUAN CARLOS', 'MARIA HELENA', 'LUIS ALBERTO', 'ANA BEATRIZ', 'JORGE LUIS', 'ROSA MARIA', 'MIGUEL ANGEL', 'CARMEN ROSA', 'JOSE LUIS', 'SILVIA PATRICIA']
+      const paternos = ['QUISPE', 'RODRIGUEZ', 'FLORES', 'SANCHEZ', 'GARCIA', 'ROJAS', 'DIAZ', 'TORRES', 'LOPEZ', 'MENDOZA']
+      const maternos = ['GONZALES', 'RAMIREZ', 'CHAVEZ', 'HUAMAN', 'VALDIVIA', 'HERRERA', 'PALOMINO', 'BENITES', 'COCA', 'FARFAN']
+      return {
+        documento: cleanNum,
+        nombre_razon_social: `${nombres[hash % nombres.length]} ${paternos[(hash + 3) % paternos.length]} ${maternos[(hash + 7) % maternos.length]}`,
+        direccion: `AV. LAS FLORES ${100 + (hash * 5)}, SAN JUAN DE LURIGANCHO, LIMA`
+      }
+    } else {
+      const empresas = ['DISTRIBUIDORA SAN JORGE S.A.C.', 'CONSTRUCTORA INMOBILIARIA ANDINA E.I.R.L.', 'REVESTIMIENTOS Y CERAMICOS LIMA S.A.', 'COMERCIAL PROGRESO DEL SUR S.R.L.']
+      return {
+        documento: cleanNum,
+        nombre_razon_social: empresas[hash % empresas.length],
+        direccion: 'AV. JAVIER PRADO ESTE 1024, SAN ISIDRO, LIMA'
+      }
+    }
+  }
 
+  // 2. INTENTAR CONSULTA A ELDNI.COM (DNI Y RUC 10)
+  const esRuc10 = tipo === 'RUC' && cleanNum.startsWith('10')
+  if (tipo === 'DNI' || esRuc10) {
+    try {
+      const urlMain = tipo === 'DNI' 
+        ? 'https://eldni.com/pe/buscar-datos-por-dni' 
+        : 'https://eldni.com/pe/buscar-nombres-por-ruc-10'
+
+      const pageRes = await fetch(urlMain, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      })
+      
+      if (pageRes.ok) {
+        const html = await pageRes.text()
+        const tokenMatch = html.match(/name="_token" value="([^"]+)"/)
+        
+        if (tokenMatch) {
+          const token = tokenMatch[1]
+          
+          // Obtener cookies
+          const setCookies = (pageRes.headers as any).getSetCookie 
+            ? (pageRes.headers as any).getSetCookie() 
+            : (pageRes.headers.get('set-cookie') || '').split(/,\s*/)
+          const cookies = setCookies.map((c: string) => c.split(';')[0]).join('; ')
+
+          const bodyParams = new URLSearchParams()
+          bodyParams.append('_token', token)
+          if (tipo === 'DNI') {
+            bodyParams.append('dni', cleanNum)
+          } else {
+            bodyParams.append('ruc10', cleanNum)
+          }
+
+          const postRes = await fetch(urlMain, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Cookie': cookies,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Referer': urlMain
+            },
+            body: bodyParams
+          })
+
+          if (postRes.ok) {
+            const resultHtml = await postRes.text()
+            const match = resultHtml.match(/id="completos"\s+value="([^"]+)"/)
+            if (match && match[1] && match[1].trim().length > 0) {
+              return {
+                documento: cleanNum,
+                nombre_razon_social: match[1].trim().toUpperCase(),
+                direccion: ''
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // Ignorar e intentar con la API secundaria
+    }
+  }
+
+  // 3. INTENTAR API SECUNDARIA (API.NET.PE - Útil para RUC 20 de empresas)
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 2000)
 
-    // API pública y gratuita disponible para propósitos de prueba
     const url = tipo === 'DNI'
       ? `https://api.net.pe/api/v1/dni/${cleanNum}`
       : `https://api.net.pe/api/v1/ruc/${cleanNum}`
@@ -29,86 +114,23 @@ export async function consultarDniRuc(tipo: 'DNI' | 'RUC', numero: string) {
     if (res.ok) {
       const data = await res.json()
       if (tipo === 'DNI' && data.nombres) {
-        apiResult = {
+        return {
           documento: cleanNum,
           nombre_razon_social: `${data.nombres} ${data.apellidoPaterno} ${data.apellidoMaterno}`.toUpperCase(),
           direccion: data.direccion || ''
         }
-        apiSucceeded = true
       } else if (tipo === 'RUC' && data.razonSocial) {
-        apiResult = {
+        return {
           documento: cleanNum,
           nombre_razon_social: data.razonSocial.toUpperCase(),
           direccion: data.direccion || ''
         }
-        apiSucceeded = true
       }
     }
   } catch (e) {
-    // Procede al chequeo
+    // Ignorar
   }
 
-  if (apiSucceeded) {
-    return apiResult
-  }
-
-  // 2. ¿ES UN DOCUMENTO DE PRUEBA / DEMOSTRACIÓN?
-  const esDemo = cleanNum === '12345678' || cleanNum === '20123456789' || cleanNum.startsWith('000') || cleanNum.startsWith('999')
-  if (!esDemo) {
-    throw new Error('El servicio gubernamental no respondió o requiere un token de pago. Por favor, ingresa el nombre y dirección manualmente.')
-  }
-
-  // 3. FALLBACK DETERMINISTA SOLO PARA PRUEBAS (DEMO)
-  const hash = Array.from(cleanNum).reduce((acc, char) => acc + Number(char), 0)
-
-  if (tipo === 'DNI') {
-    const nombres = ['JUAN CARLOS', 'MARIA HELENA', 'LUIS ALBERTO', 'ANA BEATRIZ', 'JORGE LUIS', 'ROSA MARIA', 'MIGUEL ANGEL', 'CARMEN ROSA', 'JOSE LUIS', 'SILVIA PATRICIA']
-    const paternos = ['QUISPE', 'RODRIGUEZ', 'FLORES', 'SANCHEZ', 'GARCIA', 'ROJAS', 'DIAZ', 'TORRES', 'LOPEZ', 'MENDOZA']
-    const maternos = ['GONZALES', 'RAMIREZ', 'CHAVEZ', 'HUAMAN', 'VALDIVIA', 'HERRERA', 'PALOMINO', 'BENITES', 'COCA', 'FARFAN']
-
-    const nom = nombres[hash % nombres.length]
-    const pat = paternos[(hash + 3) % paternos.length]
-    const mat = maternos[(hash + 7) % maternos.length]
-
-    return {
-      documento: cleanNum,
-      nombre_razon_social: `${nom} ${pat} ${mat}`,
-      direccion: `AV. LAS FLORES ${100 + (hash * 5)}, SAN JUAN DE LURIGANCHO, LIMA`
-    }
-  } else {
-    // RUC
-    const empresas = [
-      'DISTRIBUIDORA SAN JORGE S.A.C.',
-      'CONSTRUCTORA INMOBILIARIA ANDINA E.I.R.L.',
-      'REVESTIMIENTOS Y CERAMICOS LIMA S.A.',
-      'COMERCIAL PROGRESO DEL SUR S.R.L.',
-      'INVERSIONES MULTIPLES TRUJILLO S.A.C.',
-      'IMPORTADORA DE ACEROS Y MATERIALES SAC',
-      'REPRESENTACIONES FERRETERAS EL PACIFICO',
-      'GRUPO CONSTRUCTOR DEL CENTRO E.I.R.L.',
-      'LOGISTICA Y DISTRIBUCION NORTE SAC',
-      'ACABADOS Y DECORACIONES ELEGANCE S.A.C.'
-    ]
-    const direcciones = [
-      'AV. NICOLAS DE PIEROLA 450, PROVINCIA DE LIMA, LIMA',
-      'JR. ALFONSO UGARTE 123, TRUJILLO, LA LIBERTAD',
-      'AV. LA MARINA 1890, SAN MIGUEL, LIMA',
-      'JR. DE LA UNION 890, DISTRITO DE LIMA, LIMA',
-      'AV. ARGENTINA 3200, CALLAO',
-      'AV. JAVIER PRADO ESTE 1024, SAN ISIDRO, LIMA',
-      'JR. ANCASH 345, AREQUIPA, AREQUIPA',
-      'AV. LARCO 567, MIRAFLORES, LIMA',
-      'AV. DE LA POESIA 160, SAN BORJA, LIMA',
-      'AV. CHIMU 820, ZARATE, LIMA'
-    ]
-
-    const emp = empresas[hash % empresas.length]
-    const dir = direcciones[(hash + 2) % direcciones.length]
-
-    return {
-      documento: cleanNum,
-      nombre_razon_social: emp,
-      direccion: dir
-    }
-  }
+  // Si todo falla, arrojar error descriptivo
+  throw new Error(`No se pudo encontrar información en RENIEC/SUNAT para el ${tipo} ${cleanNum}. Por favor, ingresa los nombres y dirección manualmente.`)
 }

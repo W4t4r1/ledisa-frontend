@@ -94,9 +94,10 @@ export async function obtenerKardex(productoId?: string) {
 export async function buscarDniRucPeru(tipo: 'DNI' | 'RUC', numero: string) {
   try {
     const { consultarDniRuc } = await import('../../lib/peru-documentos')
-    return await consultarDniRuc(tipo, numero)
+    const data = await consultarDniRuc(tipo, numero)
+    return { success: true, data }
   } catch (error: any) {
-    throw new Error(error.message)
+    return { success: false, error: error.message }
   }
 }
 
