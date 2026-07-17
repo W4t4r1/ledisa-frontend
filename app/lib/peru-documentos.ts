@@ -11,6 +11,9 @@ export async function consultarDniRuc(tipo: 'DNI' | 'RUC', numero: string) {
   }
 
   // 1. Intentar consulta a API gratuita y abierta (sin token obligatorio para pruebas rápidas)
+  let apiSucceeded = false
+  let apiResult: any = null
+
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 2000)
@@ -26,25 +29,36 @@ export async function consultarDniRuc(tipo: 'DNI' | 'RUC', numero: string) {
     if (res.ok) {
       const data = await res.json()
       if (tipo === 'DNI' && data.nombres) {
-        return {
+        apiResult = {
           documento: cleanNum,
           nombre_razon_social: `${data.nombres} ${data.apellidoPaterno} ${data.apellidoMaterno}`.toUpperCase(),
           direccion: data.direccion || ''
         }
+        apiSucceeded = true
       } else if (tipo === 'RUC' && data.razonSocial) {
-        return {
+        apiResult = {
           documento: cleanNum,
           nombre_razon_social: data.razonSocial.toUpperCase(),
           direccion: data.direccion || ''
         }
+        apiSucceeded = true
       }
     }
   } catch (e) {
-    // Si la llamada falla o hace timeout, procedemos transparentemente al generador simulado
+    // Procede al chequeo
   }
 
-  // 2. FALLBACK DETERMINISTA (Garantiza que siempre retorne resultados válidos al instante)
-  // Genera datos coherentes a partir de la suma de los dígitos del documento
+  if (apiSucceeded) {
+    return apiResult
+  }
+
+  // 2. ¿ES UN DOCUMENTO DE PRUEBA / DEMOSTRACIÓN?
+  const esDemo = cleanNum === '12345678' || cleanNum === '20123456789' || cleanNum.startsWith('000') || cleanNum.startsWith('999')
+  if (!esDemo) {
+    throw new Error('El servicio gubernamental no respondió o requiere un token de pago. Por favor, ingresa el nombre y dirección manualmente.')
+  }
+
+  // 3. FALLBACK DETERMINISTA SOLO PARA PRUEBAS (DEMO)
   const hash = Array.from(cleanNum).reduce((acc, char) => acc + Number(char), 0)
 
   if (tipo === 'DNI') {
