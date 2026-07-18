@@ -52,6 +52,9 @@ export default function WorkspaceCaja({
 
   // Formulario Cierre
   const [montoRealContado, setMontoRealContado] = useState<number>(0)
+  const [montoRealYape, setMontoRealYape] = useState<number>(0)
+  const [montoRealTransferencia, setMontoRealTransferencia] = useState<number>(0)
+  const [montoRealTarjeta, setMontoRealTarjeta] = useState<number>(0)
   const [notaCierre, setNotaCierre] = useState('')
 
   // Auditoría Histórica (Modal)
@@ -84,29 +87,56 @@ export default function WorkspaceCaja({
     }
   })
 
-  // Movimientos de caja chica consolidados
+  // Movimientos de caja chica consolidados por método de pago
+  let egresosEfectivo = 0, ingresosEfectivo = 0
+  let egresosYape = 0, ingresosYape = 0
+  let egresosTarjeta = 0, ingresosTarjeta = 0
+  let egresosTransferencia = 0, ingresosTransferencia = 0
   let egresosCajaChica = 0
   let ingresosCajaChica = 0
 
   movimientos.forEach(m => {
     const montoVal = Number(m.monto)
-    if (m.tipo === 'EGRESO') {
+    const met = (m.metodo_pago || 'Efectivo').toLowerCase()
+    const tipo = m.tipo
+
+    if (tipo === 'EGRESO') {
       egresosCajaChica += montoVal
     } else {
       ingresosCajaChica += montoVal
     }
+
+    if (met.includes('efectivo')) {
+      if (tipo === 'EGRESO') egresosEfectivo += montoVal
+      else ingresosEfectivo += montoVal
+    } else if (met.includes('yape') || met.includes('plin')) {
+      if (tipo === 'EGRESO') egresosYape += montoVal
+      else ingresosYape += montoVal
+    } else if (met.includes('tarjeta') || met.includes('credito') || met.includes('debito')) {
+      if (tipo === 'EGRESO') egresosTarjeta += montoVal
+      else ingresosTarjeta += montoVal
+    } else {
+      if (tipo === 'EGRESO') egresosTransferencia += montoVal
+      else ingresosTransferencia += montoVal
+    }
   })
 
-  // Efectivo Estimado Esperado
+  // Montos Esperados por Método de Pago
   const efectivoApertura = Number(sesionActiva?.monto_apertura || 0)
-  const efectivoEstimado = efectivoApertura + ventasEfectivo + ingresosCajaChica - egresosCajaChica
+  const efectivoEstimado = efectivoApertura + ventasEfectivo + ingresosEfectivo - egresosEfectivo
+  const yapeEstimado = ventasYape + ingresosYape - egresosYape
+  const transferenciaEstimado = ventasTransferencia + ingresosTransferencia - egresosTransferencia
+  const tarjetaEstimado = ventasTarjeta + ingresosTarjeta - egresosTarjeta
 
-  // Inicializar el input de arqueo de caja con el monto calculado por defecto
+  // Inicializar los inputs de arqueo con los montos calculados por defecto
   useEffect(() => {
     if (sesionActiva) {
       setMontoRealContado(parseFloat(efectivoEstimado.toFixed(2)))
+      setMontoRealYape(parseFloat(yapeEstimado.toFixed(2)))
+      setMontoRealTransferencia(parseFloat(transferenciaEstimado.toFixed(2)))
+      setMontoRealTarjeta(parseFloat(tarjetaEstimado.toFixed(2)))
     }
-  }, [sesionActiva, efectivoEstimado])
+  }, [sesionActiva, efectivoEstimado, yapeEstimado, transferenciaEstimado, tarjetaEstimado])
 
   // --- DISPARADORES ---
 
@@ -169,9 +199,14 @@ export default function WorkspaceCaja({
 
     const confirmacion = window.confirm(
       `⚠️ ¿Estás seguro de cerrar el turno de caja?\n\n` +
-      `Efectivo Calculado: S/. ${efectivoEstimado.toFixed(2)}\n` +
-      `Efectivo Real Contado: S/. ${montoRealContado.toFixed(2)}\n` +
-      `Diferencia (Desbalance): S/. ${(montoRealContado - efectivoEstimado).toFixed(2)}\n\n` +
+      `[EFECTIVO]\n` +
+      `Esperado: S/. ${efectivoEstimado.toFixed(2)} | Real: S/. ${montoRealContado.toFixed(2)} | Dif: S/. ${(montoRealContado - efectivoEstimado).toFixed(2)}\n\n` +
+      `[YAPE/PLIN]\n` +
+      `Esperado: S/. ${yapeEstimado.toFixed(2)} | Real: S/. ${montoRealYape.toFixed(2)} | Dif: S/. ${(montoRealYape - yapeEstimado).toFixed(2)}\n\n` +
+      `[TRANSFERENCIA]\n` +
+      `Esperado: S/. ${transferenciaEstimado.toFixed(2)} | Real: S/. ${montoRealTransferencia.toFixed(2)} | Dif: S/. ${(montoRealTransferencia - transferenciaEstimado).toFixed(2)}\n\n` +
+      `[TARJETA]\n` +
+      `Esperado: S/. ${tarjetaEstimado.toFixed(2)} | Real: S/. ${montoRealTarjeta.toFixed(2)} | Dif: S/. ${(montoRealTarjeta - tarjetaEstimado).toFixed(2)}\n\n` +
       `Esta acción finalizará el turno y no se podrá deshacer.`
     )
 
@@ -179,7 +214,14 @@ export default function WorkspaceCaja({
 
     startTransition(async () => {
       try {
-        await cerrarTurnoCaja(sesionActiva.id!, montoRealContado, notaCierre)
+        await cerrarTurnoCaja(
+          sesionActiva.id!,
+          montoRealContado,
+          montoRealYape,
+          montoRealTransferencia,
+          montoRealTarjeta,
+          notaCierre
+        )
         setSesionActiva(null)
         setMovimientos([])
         setVentas([])
@@ -447,73 +489,181 @@ export default function WorkspaceCaja({
                   {/* ARQUEO Y CIERRE DE CAJA */}
                   <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6 flex flex-col justify-between">
                     <div className="space-y-4">
-                      <h3 className="text-base font-bold text-gray-800 border-b pb-2">
-                        🔒 Arqueo y Cierre de Caja
+                      <h3 className="text-base font-bold text-gray-800 border-b pb-2 flex items-center justify-between">
+                        <span>🔒 Arqueo por Métodos de Pago</span>
+                        <span className="text-xs bg-red-50 text-red-700 font-bold px-2 py-0.5 rounded border border-red-200">Arqueo Requerido</span>
                       </h3>
 
-                      {/* Monto apertura */}
-                      <div className="flex justify-between text-xs text-gray-500 font-semibold">
-                        <span>(+) Fondo Apertura:</span>
-                        <span>S/. {efectivoApertura.toFixed(2)}</span>
+                      {/* 1. SECCIÓN EFECTIVO */}
+                      <div className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-100 space-y-3">
+                        <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex justify-between items-center">
+                          <span>💵 Caja Efectivo</span>
+                          <span className="font-mono text-emerald-700">Esperado: S/. {efectivoEstimado.toFixed(2)}</span>
+                        </h4>
+                        
+                        <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 font-semibold pl-1">
+                          <span>Fondo Apertura: S/. {efectivoApertura.toFixed(2)}</span>
+                          <span>Ventas: S/. {ventasEfectivo.toFixed(2)}</span>
+                          <span>Aportes: S/. {ingresosEfectivo.toFixed(2)}</span>
+                          <span className="text-red-500">Gastos: - S/. {egresosEfectivo.toFixed(2)}</span>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 block mb-1">Efectivo Real Contado (S/.)*</label>
+                          <input 
+                            type="number"
+                            step="0.01"
+                            required
+                            min="0"
+                            value={montoRealContado}
+                            onChange={e => setMontoRealContado(parseFloat(e.target.value) || 0)}
+                            className="w-full border border-gray-300 px-3 py-1.5 rounded-lg text-gray-900 bg-white font-bold text-sm text-center focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+
+                        <div className="flex justify-between items-center text-[10px] bg-white p-2 rounded-lg border border-emerald-100">
+                          <span className="font-bold text-gray-400">Diferencia:</span>
+                          <span className={`font-black ${
+                            montoRealContado - efectivoEstimado === 0 
+                              ? 'text-green-600' 
+                              : montoRealContado - efectivoEstimado < 0 
+                              ? 'text-red-600' 
+                              : 'text-blue-600'
+                          }`}>
+                            {montoRealContado - efectivoEstimado > 0 ? '+' : ''}
+                            {(montoRealContado - efectivoEstimado).toFixed(2)}
+                          </span>
+                        </div>
                       </div>
 
-                      {/* Ventas en efectivo */}
-                      <div className="flex justify-between text-xs text-gray-500 font-semibold">
-                        <span>(+) Ventas Efectivo:</span>
-                        <span>S/. {ventasEfectivo.toFixed(2)}</span>
+                      {/* 2. SECCIÓN YAPE / PLIN */}
+                      <div className="bg-purple-50/40 p-4 rounded-xl border border-purple-100 space-y-3">
+                        <h4 className="text-xs font-bold text-purple-800 uppercase tracking-wider flex justify-between items-center">
+                          <span>📱 Yape / Plin</span>
+                          <span className="font-mono text-purple-700">Esperado: S/. {yapeEstimado.toFixed(2)}</span>
+                        </h4>
+
+                        <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 font-semibold pl-1">
+                          <span>Ventas: S/. {ventasYape.toFixed(2)}</span>
+                          <span>Aportes: S/. {ingresosYape.toFixed(2)}</span>
+                          <span className="text-red-500">Gastos: - S/. {egresosYape.toFixed(2)}</span>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 block mb-1">Monto Real en Yape (S/.)*</label>
+                          <input 
+                            type="number"
+                            step="0.01"
+                            required
+                            min="0"
+                            value={montoRealYape}
+                            onChange={e => setMontoRealYape(parseFloat(e.target.value) || 0)}
+                            className="w-full border border-gray-300 px-3 py-1.5 rounded-lg text-gray-900 bg-white font-bold text-sm text-center focus:outline-none focus:border-purple-600"
+                          />
+                        </div>
+
+                        <div className="flex justify-between items-center text-[10px] bg-white p-2 rounded-lg border border-purple-100">
+                          <span className="font-bold text-gray-400">Diferencia:</span>
+                          <span className={`font-black ${
+                            montoRealYape - yapeEstimado === 0 
+                              ? 'text-green-600' 
+                              : montoRealYape - yapeEstimado < 0 
+                              ? 'text-red-600' 
+                              : 'text-blue-600'
+                          }`}>
+                            {montoRealYape - yapeEstimado > 0 ? '+' : ''}
+                            {(montoRealYape - yapeEstimado).toFixed(2)}
+                          </span>
+                        </div>
                       </div>
 
-                      {/* Aportes */}
-                      <div className="flex justify-between text-xs text-gray-500 font-semibold">
-                        <span>(+) Aportes Caja Chica:</span>
-                        <span>S/. {ingresosCajaChica.toFixed(2)}</span>
+                      {/* 3. SECCIÓN TRANSFERENCIA */}
+                      <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100 space-y-3">
+                        <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider flex justify-between items-center">
+                          <span>🏦 Transferencia Bancaria</span>
+                          <span className="font-mono text-blue-700">Esperado: S/. {transferenciaEstimado.toFixed(2)}</span>
+                        </h4>
+
+                        <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 font-semibold pl-1">
+                          <span>Ventas: S/. {ventasTransferencia.toFixed(2)}</span>
+                          <span>Aportes: S/. {ingresosTransferencia.toFixed(2)}</span>
+                          <span className="text-red-500">Gastos: - S/. {egresosTransferencia.toFixed(2)}</span>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 block mb-1">Monto Real en Cuentas (S/.)*</label>
+                          <input 
+                            type="number"
+                            step="0.01"
+                            required
+                            min="0"
+                            value={montoRealTransferencia}
+                            onChange={e => setMontoRealTransferencia(parseFloat(e.target.value) || 0)}
+                            className="w-full border border-gray-300 px-3 py-1.5 rounded-lg text-gray-900 bg-white font-bold text-sm text-center focus:outline-none focus:border-blue-600"
+                          />
+                        </div>
+
+                        <div className="flex justify-between items-center text-[10px] bg-white p-2 rounded-lg border border-blue-100">
+                          <span className="font-bold text-gray-400">Diferencia:</span>
+                          <span className={`font-black ${
+                            montoRealTransferencia - transferenciaEstimado === 0 
+                              ? 'text-green-600' 
+                              : montoRealTransferencia - transferenciaEstimado < 0 
+                              ? 'text-red-600' 
+                              : 'text-blue-600'
+                          }`}>
+                            {montoRealTransferencia - transferenciaEstimado > 0 ? '+' : ''}
+                            {(montoRealTransferencia - transferenciaEstimado).toFixed(2)}
+                          </span>
+                        </div>
                       </div>
 
-                      {/* Gastos */}
-                      <div className="flex justify-between text-xs text-gray-500 font-semibold">
-                        <span>(-) Egresos Caja Chica:</span>
-                        <span className="text-red-500">- S/. {egresosCajaChica.toFixed(2)}</span>
-                      </div>
+                      {/* 4. SECCIÓN TARJETA */}
+                      <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-100 space-y-3">
+                        <h4 className="text-xs font-bold text-amber-800 uppercase tracking-wider flex justify-between items-center">
+                          <span>💳 POS / Tarjetas</span>
+                          <span className="font-mono text-amber-700">Esperado: S/. {tarjetaEstimado.toFixed(2)}</span>
+                        </h4>
 
-                      <div className="flex justify-between text-sm font-bold text-gray-700 border-t pt-2">
-                        <span>Efectivo Esperado:</span>
-                        <span>S/. {efectivoEstimado.toFixed(2)}</span>
-                      </div>
+                        <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 font-semibold pl-1">
+                          <span>Ventas: S/. {ventasTarjeta.toFixed(2)}</span>
+                          <span>Aportes: S/. {ingresosTarjeta.toFixed(2)}</span>
+                          <span className="text-red-500">Gastos: - S/. {egresosTarjeta.toFixed(2)}</span>
+                        </div>
 
-                      {/* Efectivo Contado */}
-                      <div className="pt-2">
-                        <label className="text-xs font-bold text-gray-500 block mb-1">Efectivo Físico Contado en Caja (S/.)*</label>
-                        <input 
-                          type="number"
-                          step="0.01"
-                          required
-                          min="0"
-                          value={montoRealContado}
-                          onChange={e => setMontoRealContado(parseFloat(e.target.value) || 0)}
-                          className="w-full border border-gray-300 p-3 rounded-lg text-gray-900 bg-white font-bold text-lg text-center focus:outline-none focus:border-[#04558C]"
-                        />
-                      </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 block mb-1">Monto Real en POS (S/.)*</label>
+                          <input 
+                            type="number"
+                            step="0.01"
+                            required
+                            min="0"
+                            value={montoRealTarjeta}
+                            onChange={e => setMontoRealTarjeta(parseFloat(e.target.value) || 0)}
+                            className="w-full border border-gray-300 px-3 py-1.5 rounded-lg text-gray-900 bg-white font-bold text-sm text-center focus:outline-none focus:border-amber-600"
+                          />
+                        </div>
 
-                      {/* Diferencia */}
-                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border text-xs">
-                        <span className="font-bold text-gray-500">Desbalance / Diferencia:</span>
-                        <span className={`font-black text-sm ${
-                          montoRealContado - efectivoEstimado === 0 
-                            ? 'text-green-600' 
-                            : montoRealContado - efectivoEstimado < 0 
-                            ? 'text-red-600' 
-                            : 'text-blue-600'
-                        }`}>
-                          {montoRealContado - efectivoEstimado > 0 ? '+' : ''}
-                          {parseFloat((montoRealContado - efectivoEstimado).toFixed(2))}
-                        </span>
+                        <div className="flex justify-between items-center text-[10px] bg-white p-2 rounded-lg border border-amber-100">
+                          <span className="font-bold text-gray-400">Diferencia:</span>
+                          <span className={`font-black ${
+                            montoRealTarjeta - tarjetaEstimado === 0 
+                              ? 'text-green-600' 
+                              : montoRealTarjeta - tarjetaEstimado < 0 
+                              ? 'text-red-600' 
+                              : 'text-blue-600'
+                          }`}>
+                            {montoRealTarjeta - tarjetaEstimado > 0 ? '+' : ''}
+                            {(montoRealTarjeta - tarjetaEstimado).toFixed(2)}
+                          </span>
+                        </div>
                       </div>
 
                       {/* Nota de cierre */}
                       <div>
                         <label className="text-xs font-bold text-gray-500 block mb-1">Nota del Cierre / Novedades</label>
                         <textarea 
-                          rows={3}
+                          rows={2}
                           placeholder="Escribe aquí si hubo algún descuadre de caja o novedad..."
                           value={notaCierre}
                           onChange={e => setNotaCierre(e.target.value)}
@@ -639,57 +789,78 @@ export default function WorkspaceCaja({
               </button>
             </div>
 
-            {/* Cuadre general */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-gray-50 p-4 rounded-lg border mb-6 text-xs font-semibold text-gray-600">
-              <div className="space-y-1">
-                <span className="text-gray-400 block font-bold uppercase text-[9px]">Fondo Inicial</span>
-                <span className="text-sm font-black text-gray-800">S/. {Number(cierreSeleccionado.monto_apertura).toFixed(2)}</span>
-              </div>
-              <div className="space-y-1">
-                <span className="text-gray-400 block font-bold uppercase text-[9px]">Efectivo Esperado</span>
-                <span className="text-sm font-black text-gray-800">S/. {Number(cierreSeleccionado.monto_cierre_efectivo_calculado || 0).toFixed(2)}</span>
-              </div>
-              <div className="space-y-1">
-                <span className="text-gray-400 block font-bold uppercase text-[9px]">Efectivo Contado</span>
-                <span className="text-sm font-black text-gray-800">S/. {Number(cierreSeleccionado.monto_cierre_efectivo_real || 0).toFixed(2)}</span>
-              </div>
-              <div className="space-y-1">
-                <span className="text-gray-400 block font-bold uppercase text-[9px]">Desbalance</span>
-                <span className={`text-sm font-black ${
-                  Number(cierreSeleccionado.diferencia || 0) === 0 
-                    ? 'text-green-600' 
-                    : Number(cierreSeleccionado.diferencia || 0) < 0 
-                    ? 'text-red-600' 
-                    : 'text-blue-600'
-                }`}>
-                  {Number(cierreSeleccionado.diferencia || 0) > 0 ? '+' : ''}
-                  {Number(cierreSeleccionado.diferencia || 0).toFixed(2)}
-                </span>
-              </div>
-            </div>
-
-            {/* Ventas consolidadas por método */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <h4 className="font-bold text-[#04558C] text-xs uppercase mb-3 tracking-wider">
-                Consolidado de Ventas por Método de Pago
+            {/* Cuadre general por Métodos de Pago */}
+            <div className="space-y-3 mb-6 text-xs">
+              <h4 className="font-bold text-gray-800 text-xs uppercase tracking-wider">
+                Resumen de Arqueos y Desbalances del Turno
               </h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-semibold text-gray-700">
-                <div className="flex justify-between border-r pr-4">
-                  <span>💵 Efectivo:</span>
-                  <span className="font-bold text-gray-900 font-mono">S/. {Number(cierreSeleccionado.total_ventas_efectivo || 0).toFixed(2)}</span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-gray-700">
+                
+                {/* Arqueo Efectivo */}
+                <div className="bg-emerald-50/50 p-3 rounded-lg border border-emerald-100 space-y-1.5">
+                  <span className="font-bold text-emerald-800 block text-[9px] uppercase">💵 Efectivo</span>
+                  <div className="text-[10px] text-gray-500 space-y-0.5">
+                    <p>Fondo Inicial: S/. {Number(cierreSeleccionado.monto_apertura).toFixed(2)}</p>
+                    <p>Esperado: S/. {Number(cierreSeleccionado.monto_cierre_efectivo_calculado || 0).toFixed(2)}</p>
+                    <p className="font-bold text-gray-700">Real: S/. {Number(cierreSeleccionado.monto_cierre_efectivo_real || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="border-t pt-1 flex justify-between font-bold">
+                    <span className="text-gray-400 text-[8px] uppercase">Dif:</span>
+                    <span className={Number(cierreSeleccionado.diferencia || 0) === 0 ? 'text-green-600' : Number(cierreSeleccionado.diferencia || 0) < 0 ? 'text-red-600' : 'text-blue-600'}>
+                      {Number(cierreSeleccionado.diferencia || 0) > 0 ? '+' : ''}{Number(cierreSeleccionado.diferencia || 0).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between border-r px-2 md:px-4">
-                  <span>📱 Yape/Plin:</span>
-                  <span className="font-bold text-gray-900 font-mono">S/. {Number(cierreSeleccionado.total_ventas_yape || 0).toFixed(2)}</span>
+
+                {/* Arqueo Yape/Plin */}
+                <div className="bg-purple-50/50 p-3 rounded-lg border border-purple-100 space-y-1.5">
+                  <span className="font-bold text-purple-800 block text-[9px] uppercase">📱 Yape / Plin</span>
+                  <div className="text-[10px] text-gray-500 space-y-0.5">
+                    <p className="text-transparent select-none">-</p>
+                    <p>Esperado: S/. {Number(cierreSeleccionado.total_ventas_yape || 0).toFixed(2)}</p>
+                    <p className="font-bold text-gray-700">Real: S/. {Number(cierreSeleccionado.monto_cierre_yape_real || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="border-t pt-1 flex justify-between font-bold">
+                    <span className="text-gray-400 text-[8px] uppercase">Dif:</span>
+                    <span className={Number(cierreSeleccionado.diferencia_yape || 0) === 0 ? 'text-green-600' : Number(cierreSeleccionado.diferencia_yape || 0) < 0 ? 'text-red-600' : 'text-blue-600'}>
+                      {Number(cierreSeleccionado.diferencia_yape || 0) > 0 ? '+' : ''}{Number(cierreSeleccionado.diferencia_yape || 0).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between border-r px-2 md:px-4">
-                  <span>🏦 Transf:</span>
-                  <span className="font-bold text-gray-900 font-mono">S/. {Number(cierreSeleccionado.total_ventas_transferencia || 0).toFixed(2)}</span>
+
+                {/* Arqueo Transferencia */}
+                <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100 space-y-1.5">
+                  <span className="font-bold text-blue-800 block text-[9px] uppercase">🏦 Transferencia</span>
+                  <div className="text-[10px] text-gray-500 space-y-0.5">
+                    <p className="text-transparent select-none">-</p>
+                    <p>Esperado: S/. {Number(cierreSeleccionado.total_ventas_transferencia || 0).toFixed(2)}</p>
+                    <p className="font-bold text-gray-700">Real: S/. {Number(cierreSeleccionado.monto_cierre_transferencia_real || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="border-t pt-1 flex justify-between font-bold">
+                    <span className="text-gray-400 text-[8px] uppercase">Dif:</span>
+                    <span className={Number(cierreSeleccionado.diferencia_transferencia || 0) === 0 ? 'text-green-600' : Number(cierreSeleccionado.diferencia_transferencia || 0) < 0 ? 'text-red-600' : 'text-blue-600'}>
+                      {Number(cierreSeleccionado.diferencia_transferencia || 0) > 0 ? '+' : ''}{Number(cierreSeleccionado.diferencia_transferencia || 0).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between pl-4">
-                  <span>💳 Tarjetas:</span>
-                  <span className="font-bold text-gray-900 font-mono">S/. {Number(cierreSeleccionado.total_ventas_tarjeta || 0).toFixed(2)}</span>
+
+                {/* Arqueo Tarjeta */}
+                <div className="bg-amber-50/50 p-3 rounded-lg border border-amber-100 space-y-1.5">
+                  <span className="font-bold text-amber-800 block text-[9px] uppercase">💳 Tarjetas POS</span>
+                  <div className="text-[10px] text-gray-500 space-y-0.5">
+                    <p className="text-transparent select-none">-</p>
+                    <p>Esperado: S/. {Number(cierreSeleccionado.total_ventas_tarjeta || 0).toFixed(2)}</p>
+                    <p className="font-bold text-gray-700">Real: S/. {Number(cierreSeleccionado.monto_cierre_tarjeta_real || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="border-t pt-1 flex justify-between font-bold">
+                    <span className="text-gray-400 text-[8px] uppercase">Dif:</span>
+                    <span className={Number(cierreSeleccionado.diferencia_tarjeta || 0) === 0 ? 'text-green-600' : Number(cierreSeleccionado.diferencia_tarjeta || 0) < 0 ? 'text-red-600' : 'text-blue-600'}>
+                      {Number(cierreSeleccionado.diferencia_tarjeta || 0) > 0 ? '+' : ''}{Number(cierreSeleccionado.diferencia_tarjeta || 0).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
+
               </div>
             </div>
 

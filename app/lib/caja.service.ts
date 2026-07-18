@@ -8,6 +8,12 @@ export interface CajaSesion {
   monto_cierre_efectivo_calculado?: number
   monto_cierre_efectivo_real?: number
   diferencia?: number
+  monto_cierre_tarjeta_real?: number
+  diferencia_tarjeta?: number
+  monto_cierre_transferencia_real?: number
+  diferencia_transferencia?: number
+  monto_cierre_yape_real?: number
+  diferencia_yape?: number
   estado: 'ABIERTA' | 'CERRADA'
   total_ventas_efectivo?: number
   total_ventas_tarjeta?: number
@@ -144,6 +150,9 @@ export async function getVentasSesionCaja(sesionId: string): Promise<any[]> {
 export async function ejecutarCierreCaja(
   sesionId: string,
   montoRealEfectivo: number,
+  montoRealYape: number,
+  montoRealTransferencia: number,
+  montoRealTarjeta: number,
   nota: string
 ): Promise<CajaSesion> {
   // 1. Obtener la sesión activa para validar su estado y saldo inicial
@@ -175,7 +184,7 @@ export async function ejecutarCierreCaja(
   // 3. Cargar todos los movimientos de caja chica registrados
   const { data: movimientos, error: errMov } = await supabase
     .from('caja_chica_movimientos')
-    .select('tipo, monto')
+    .select('tipo, monto, metodo_pago')
     .eq('sesion_id', sesionId)
 
   if (errMov) {
@@ -204,22 +213,54 @@ export async function ejecutarCierreCaja(
     }
   })
 
-  // 5. Calcular consolidados de caja chica
+  // 5. Calcular consolidados de caja chica por método de pago
   let egresosCajaChica = 0
   let ingresosCajaChica = 0
+  
+  let egresosEfectivo = 0, ingresosEfectivo = 0
+  let egresosYape = 0, ingresosYape = 0
+  let egresosTarjeta = 0, ingresosTarjeta = 0
+  let egresosTransferencia = 0, ingresosTransferencia = 0
 
   movimientos?.forEach(m => {
     const montoVal = Number(m.monto)
-    if (m.tipo === 'EGRESO') {
+    const met = (m.metodo_pago || 'Efectivo').toLowerCase()
+    const tipo = m.tipo
+
+    // Totales globales para historial
+    if (tipo === 'EGRESO') {
       egresosCajaChica += montoVal
     } else {
       ingresosCajaChica += montoVal
     }
+
+    // Desglose por método
+    if (met.includes('efectivo')) {
+      if (tipo === 'EGRESO') egresosEfectivo += montoVal
+      else ingresosEfectivo += montoVal
+    } else if (met.includes('yape') || met.includes('plin')) {
+      if (tipo === 'EGRESO') egresosYape += montoVal
+      else ingresosYape += montoVal
+    } else if (met.includes('tarjeta') || met.includes('credito') || met.includes('debito')) {
+      if (tipo === 'EGRESO') egresosTarjeta += montoVal
+      else ingresosTarjeta += montoVal
+    } else {
+      if (tipo === 'EGRESO') egresosTransferencia += montoVal
+      else ingresosTransferencia += montoVal
+    }
   })
 
-  // 6. Efectivo Calculado Esperado: Apertura + Ventas Efectivo + Ingresos Caja Chica - Egresos Caja Chica
-  const efectivoEsperado = Number(sesion.monto_apertura) + vEfectivo + ingresosCajaChica - egresosCajaChica
+  // 6. Montos Esperados por Método de Pago
+  const efectivoEsperado = Number(sesion.monto_apertura) + vEfectivo + ingresosEfectivo - egresosEfectivo
+  const yapeEsperado = vYape + ingresosYape - egresosYape
+  const transferenciaEsperado = vTransferencia + ingresosTransferencia - egresosTransferencia
+  const tarjetaEsperado = vTarjeta + ingresosTarjeta - egresosTarjeta
+
+  // Discrepancias
   const diferencia = montoRealEfectivo - efectivoEsperado
+  const diferenciaYape = montoRealYape - yapeEsperado
+  const diferenciaTransferencia = montoRealTransferencia - transferenciaEsperado
+  const diferenciaTarjeta = montoRealTarjeta - tarjetaEsperado
 
   // 7. Actualizar la sesión en base de datos
   const { data: sesionCerrada, error: errCierre } = await supabase
@@ -230,6 +271,12 @@ export async function ejecutarCierreCaja(
       monto_cierre_efectivo_calculado: efectivoEsperado,
       monto_cierre_efectivo_real: montoRealEfectivo,
       diferencia: diferencia,
+      monto_cierre_yape_real: montoRealYape,
+      diferencia_yape: diferenciaYape,
+      monto_cierre_transferencia_real: montoRealTransferencia,
+      diferencia_transferencia: diferenciaTransferencia,
+      monto_cierre_tarjeta_real: montoRealTarjeta,
+      diferencia_tarjeta: diferenciaTarjeta,
       total_ventas_efectivo: vEfectivo,
       total_ventas_tarjeta: vTarjeta,
       total_ventas_yape: vYape,

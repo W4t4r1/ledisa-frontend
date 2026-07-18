@@ -472,6 +472,12 @@ CREATE TABLE IF NOT EXISTS cajas_sesiones (
     total_ventas_yape NUMERIC(12, 2) DEFAULT 0.00,
     total_egresos_caja_chica NUMERIC(12, 2) DEFAULT 0.00,
     total_ingresos_caja_chica NUMERIC(12, 2) DEFAULT 0.00,
+    monto_cierre_tarjeta_real NUMERIC(12, 2) DEFAULT 0.00,
+    diferencia_tarjeta NUMERIC(12, 2) DEFAULT 0.00,
+    monto_cierre_transferencia_real NUMERIC(12, 2) DEFAULT 0.00,
+    diferencia_transferencia NUMERIC(12, 2) DEFAULT 0.00,
+    monto_cierre_yape_real NUMERIC(12, 2) DEFAULT 0.00,
+    diferencia_yape NUMERIC(12, 2) DEFAULT 0.00,
     nota TEXT
 );
 

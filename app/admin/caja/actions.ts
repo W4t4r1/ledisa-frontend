@@ -66,9 +66,23 @@ export async function guardarMovimientoCajaChica(
 /**
  * Cierra la caja del turno actual y guarda consolidados.
  */
-export async function cerrarTurnoCaja(sesionId: string, montoRealEfectivo: number, nota: string) {
+export async function cerrarTurnoCaja(
+  sesionId: string,
+  montoRealEfectivo: number,
+  montoRealYape: number,
+  montoRealTransferencia: number,
+  montoRealTarjeta: number,
+  nota: string
+) {
   try {
-    const res = await ejecutarCierreCaja(sesionId, montoRealEfectivo, nota)
+    const res = await ejecutarCierreCaja(
+      sesionId,
+      montoRealEfectivo,
+      montoRealYape,
+      montoRealTransferencia,
+      montoRealTarjeta,
+      nota
+    )
     revalidatePath('/admin/caja')
     revalidatePath('/admin/ventas')
     revalidatePath('/admin/dashboard') // Actualiza indicadores financieros globales
