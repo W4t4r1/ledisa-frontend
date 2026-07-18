@@ -29,6 +29,7 @@ export async function guardarProducto(productoBase: any, esEdicion: boolean) {
     precio: parseFloat(productoBase.precio),
     costo: parseFloat(productoBase.costo || 0),
     stock: parseInt(productoBase.stock),
+    stock_minimo: parseInt(productoBase.stock_minimo || 0),
     m2_caja: parseFloat(productoBase.m2_caja || 0),
     piezas_sueltas: parseInt(productoBase.piezas_sueltas || 0),
     color: productoBase.color?.trim() || null,

@@ -8,6 +8,9 @@ export interface ItemVenta {
   costo_unitario: number
   piezas_por_caja: number
   subtotal: number
+  lote?: string
+  tono?: string
+  calibre?: string
 }
 
 export interface VentaData {

@@ -19,6 +19,9 @@ export interface AjusteStockData {
   cantidad_cajas: number
   piezas_sueltas: number
   motivo: 'VENTA' | 'COMPRA' | 'AJUSTE' | 'ROTURA' | 'DEVOLUCION' | 'ANULACION_VENTA'
+  lote?: string
+  tono?: string
+  calibre?: string
 }
 
 /**
@@ -96,7 +99,10 @@ export async function registrarAjusteInventario(ajuste: AjusteStockData): Promis
       cantidad_cajas: esRecubrimiento ? ajuste.cantidad_cajas : 0,
       piezas_sueltas: ajuste.piezas_sueltas,
       motivo: ajuste.motivo,
-      referencia_id: null
+      referencia_id: null,
+      lote: ajuste.lote || null,
+      tono: ajuste.tono || null,
+      calibre: ajuste.calibre || null
     })
 
   if (errKardex) {

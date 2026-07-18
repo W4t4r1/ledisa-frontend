@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { buscarCliente, guardarCliente, crearNuevaVenta, buscarClientes, buscarDniRucPeru } from './actions'
 import ComprobantePrint from '../../components/ComprobantePrint'
 
@@ -26,9 +26,20 @@ interface CartItem {
   piezas_por_caja: number // Divisor para calcular precio de piezas sueltas
   subtotal: number
   m2_solicitados: number // M2 solicitados/cobrados
+  lote?: string
+  tono?: string
+  calibre?: string
 }
 
-export default function RegistroVentas({ productos }: { productos: Producto[] }) {
+export default function RegistroVentas({ 
+  productos,
+  cotizacionCargar,
+  setCotizacionCargar
+}: { 
+  productos: Producto[]
+  cotizacionCargar: any
+  setCotizacionCargar: (cotizacion: any) => void
+}) {
   const [isPending, startTransition] = useTransition()
   
   // Estado de Clientes
@@ -73,6 +84,63 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
     p.nombre.toLowerCase().includes(busquedaProd.toLowerCase()) ||
     p.id.toLowerCase().includes(busquedaProd.toLowerCase())
   ).slice(0, 5)
+
+  // Cargar cotización seleccionada en historial
+  useEffect(() => {
+    if (cotizacionCargar) {
+      // 1. Establecer cliente si existe
+      if (cotizacionCargar.clientes) {
+        setClienteSeleccionado({
+          id: cotizacionCargar.cliente_id,
+          ...cotizacionCargar.clientes
+        })
+        setDocumentoBusqueda(cotizacionCargar.clientes.nombre_razon_social)
+      } else {
+        setClienteSeleccionado(null)
+        setDocumentoBusqueda('')
+      }
+      
+      // 2. Poblar carrito
+      const itemsCargados: CartItem[] = cotizacionCargar.items.map((item: any) => {
+        const prod = productos.find(p => p.id === item.producto_id) || {
+          id: item.producto_id,
+          nombre: item.inventario?.nombre || 'Producto Desconocido',
+          categoria: item.inventario?.categoria || '',
+          marca: '',
+          precio: item.precio_unitario,
+          costo: item.costo_unitario || 0,
+          stock: 9999,
+          m2_caja: item.inventario?.m2_caja || 0,
+          piezas_sueltas: 0
+        }
+        
+        return {
+          producto: prod,
+          cantidad_cajas: item.cantidad_cajas,
+          piezas_sueltas: item.piezas_sueltas,
+          precio_unitario: item.precio_unitario,
+          costo_unitario: item.costo_unitario,
+          piezas_por_caja: item.piezas_por_caja || 6,
+          subtotal: item.subtotal,
+          m2_solicitados: prod.m2_caja > 0 
+            ? parseFloat(((item.cantidad_cajas * prod.m2_caja) + (item.piezas_sueltas * (prod.m2_caja / (item.piezas_por_caja || 6)))).toFixed(2)) 
+            : 0,
+          lote: item.lote || '',
+          tono: item.tono || '',
+          calibre: item.calibre || ''
+        }
+      })
+      
+      setCarrito(itemsCargados)
+      setDescuento(cotizacionCargar.descuento || 0)
+      setNota(cotizacionCargar.nota || '')
+      setMetodoPago(cotizacionCargar.metodo_pago || 'Efectivo')
+      setEstadoVenta('PAGADO') // Se carga para pagarse/facturarse
+      
+      // Limpiar cotización del estado compartido para evitar loops
+      setCotizacionCargar(null)
+    }
+  }, [cotizacionCargar, productos, setCotizacionCargar])
 
   // Búsqueda de cliente al enviar formulario (Enter)
   const handleBuscarCliente = async (e: React.FormEvent) => {
@@ -274,7 +342,10 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
             precio_unitario: item.precio_unitario,
             costo_unitario: item.costo_unitario,
             piezas_por_caja: item.piezas_por_caja,
-            subtotal: item.subtotal
+            subtotal: item.subtotal,
+            lote: item.lote || null,
+            tono: item.tono || null,
+            calibre: item.calibre || null
           }))
         }
 
@@ -513,9 +584,43 @@ export default function RegistroVentas({ productos }: { productos: Producto[] })
                           </div>
 
                           {esRecubrimiento && (
-                            <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded w-max mt-1.5">
-                              Rendimiento: {p.m2_caja} m²/caja
-                            </span>
+                            <>
+                              <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded w-max mt-1.5">
+                                Rendimiento: {p.m2_caja} m²/caja
+                              </span>
+                              <div className="flex gap-2 mt-2">
+                                <div className="flex flex-col">
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase">Lote</label>
+                                  <input 
+                                    type="text" 
+                                    placeholder="Lote"
+                                    value={item.lote || ''}
+                                    onChange={e => actualizarItemCarrito(p.id, 'lote', e.target.value)}
+                                    className="border text-center w-16 p-1 rounded text-[10px] text-gray-900 bg-white"
+                                  />
+                                </div>
+                                <div className="flex flex-col">
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase">Tono</label>
+                                  <input 
+                                    type="text" 
+                                    placeholder="Tono"
+                                    value={item.tono || ''}
+                                    onChange={e => actualizarItemCarrito(p.id, 'tono', e.target.value)}
+                                    className="border text-center w-14 p-1 rounded text-[10px] text-gray-900 bg-white"
+                                  />
+                                </div>
+                                <div className="flex flex-col">
+                                  <label className="text-[9px] font-bold text-gray-400 uppercase">Calibre</label>
+                                  <input 
+                                    type="text" 
+                                    placeholder="Calibre"
+                                    value={item.calibre || ''}
+                                    onChange={e => actualizarItemCarrito(p.id, 'calibre', e.target.value)}
+                                    className="border text-center w-12 p-1 rounded text-[10px] text-gray-900 bg-white"
+                                  />
+                                </div>
+                              </div>
+                            </>
                           )}
                         </div>
                       </div>

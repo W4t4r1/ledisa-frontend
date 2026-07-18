@@ -26,6 +26,9 @@ interface CartItemCompra {
   costo_unitario: number
   piezas_por_caja: number // Divisor estándar para piezas sueltas (por defecto 6)
   subtotal: number
+  lote?: string
+  tono?: string
+  calibre?: string
 }
 
 interface WorkspaceComprasProps {
@@ -296,7 +299,10 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
             cantidad_cajas: item.cantidad_cajas,
             piezas_sueltas: item.piezas_sueltas,
             costo_unitario: item.costo_unitario,
-            subtotal: item.subtotal
+            subtotal: item.subtotal,
+            lote: item.lote || null,
+            tono: item.tono || null,
+            calibre: item.calibre || null
           }))
         }
 
@@ -565,9 +571,43 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                               <span className="font-bold text-gray-800 text-sm">{p.nombre}</span>
                               <span className="text-[10px] text-gray-400 font-mono">Cód: {p.id} {p.marca ? `| Marca: ${p.marca}` : ''}</span>
                               {esRecubrimiento && (
-                                <span className="text-[9px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded w-max mt-1">
-                                  Rendimiento: {p.m2_caja} m²/caja
-                                </span>
+                                <>
+                                  <span className="text-[9px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded w-max mt-1">
+                                    Rendimiento: {p.m2_caja} m²/caja
+                                  </span>
+                                  <div className="flex gap-2 mt-2">
+                                    <div className="flex flex-col">
+                                      <label className="text-[9px] font-bold text-gray-400 uppercase">Lote</label>
+                                      <input 
+                                        type="text" 
+                                        placeholder="Lote"
+                                        value={item.lote || ''}
+                                        onChange={e => actualizarItemCarrito(p.id, 'lote', e.target.value)}
+                                        className="border text-center w-16 p-1 rounded text-[10px] text-gray-900 bg-white"
+                                      />
+                                    </div>
+                                    <div className="flex flex-col">
+                                      <label className="text-[9px] font-bold text-gray-400 uppercase">Tono</label>
+                                      <input 
+                                        type="text" 
+                                        placeholder="Tono"
+                                        value={item.tono || ''}
+                                        onChange={e => actualizarItemCarrito(p.id, 'tono', e.target.value)}
+                                        className="border text-center w-14 p-1 rounded text-[10px] text-gray-900 bg-white"
+                                      />
+                                    </div>
+                                    <div className="flex flex-col">
+                                      <label className="text-[9px] font-bold text-gray-400 uppercase">Calibre</label>
+                                      <input 
+                                        type="text" 
+                                        placeholder="Calibre"
+                                        value={item.calibre || ''}
+                                        onChange={e => actualizarItemCarrito(p.id, 'calibre', e.target.value)}
+                                        className="border text-center w-12 p-1 rounded text-[10px] text-gray-900 bg-white"
+                                      />
+                                    </div>
+                                  </div>
+                                </>
                               )}
                             </div>
 
@@ -1119,7 +1159,12 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                           <td className="p-2 pl-3 py-3">
                             <div className="flex flex-col">
                               <span className="font-bold text-gray-800">{p?.nombre || 'Producto Eliminado'}</span>
-                              <span className="text-[10px] text-gray-400 font-mono">Cód: {item.producto_id} {p?.color ? `| Color: ${p.color}` : ''}</span>
+                              <span className="text-[10px] text-gray-400 font-mono">
+                                Cód: {item.producto_id} {p?.color ? `| Color: ${p.color}` : ''}
+                                {item.lote ? ` | Lote: ${item.lote}` : ''}
+                                {item.tono ? ` | Tono: ${item.tono}` : ''}
+                                {item.calibre ? ` | Calibre: ${item.calibre}` : ''}
+                              </span>
                             </div>
                           </td>
                           <td className="p-2 text-center font-bold">

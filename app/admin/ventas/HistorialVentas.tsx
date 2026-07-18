@@ -22,7 +22,15 @@ interface Venta {
   } | null
 }
 
-export default function HistorialVentas({ ventasIniciales }: { ventasIniciales: Venta[] }) {
+export default function HistorialVentas({ 
+  ventasIniciales,
+  setCotizacionCargar,
+  setTabActiva
+}: { 
+  ventasIniciales: Venta[]
+  setCotizacionCargar: (cotizacion: any) => void
+  setTabActiva: (tab: 'registrar' | 'historial' | 'calculadora') => void
+}) {
   const [isPending, startTransition] = useTransition()
   const [busqueda, setBusqueda] = useState('')
   const [ventaSeleccionada, setVentaSeleccionada] = useState<Venta | null>(null)
@@ -171,6 +179,26 @@ export default function HistorialVentas({ ventasIniciales }: { ventasIniciales: 
                       >
                         🖨️ Imprimir
                       </button>
+                      {v.estado === 'COTIZACION' && (
+                        <button 
+                          onClick={async () => {
+                            try {
+                              const resDetalles = await obtenerDetalle(v.id)
+                              setCotizacionCargar({
+                                ...v,
+                                items: resDetalles
+                              })
+                              setTabActiva('registrar')
+                            } catch (err: any) {
+                              alert('❌ Error al cargar cotización: ' + err.message)
+                            }
+                          }}
+                          className="text-amber-700 hover:text-amber-900 font-bold text-xs bg-amber-50 hover:bg-amber-100 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
+                          title="Cargar esta cotización para facturarla"
+                        >
+                          ⚡ Facturar
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -255,7 +283,12 @@ export default function HistorialVentas({ ventasIniciales }: { ventasIniciales: 
                           <td className="p-2 py-3">
                             <div className="flex flex-col">
                               <span className="font-semibold text-gray-800">{p?.nombre || 'Producto Eliminado'}</span>
-                              <span className="text-[10px] text-gray-400 font-mono">Cód: {item.producto_id} {p?.color ? `| Color: ${p.color}` : ''}</span>
+                              <span className="text-[10px] text-gray-400 font-mono">
+                                Cód: {item.producto_id} {p?.color ? `| Color: ${p.color}` : ''}
+                                {item.lote ? ` | Lote: ${item.lote}` : ''}
+                                {item.tono ? ` | Tono: ${item.tono}` : ''}
+                                {item.calibre ? ` | Calibre: ${item.calibre}` : ''}
+                              </span>
                             </div>
                           </td>
                           <td className="p-2 text-center font-bold">

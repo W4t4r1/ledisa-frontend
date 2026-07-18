@@ -26,7 +26,7 @@ export default function DashboardWorkspace({ inventario, ventas, clientes }: Das
     }
   }, 0)
   const productosAgotados = inventario.filter(item => item.stock === 0)
-  const productosBajoStock = inventario.filter(item => item.stock > 0 && item.stock <= 5)
+  const productosBajoStock = inventario.filter(item => item.stock > 0 && item.stock <= (item.stock_minimo !== undefined ? item.stock_minimo : 5))
 
   // 2. CRM Clientes
   const totalClientes = clientes.length

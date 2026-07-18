@@ -16,6 +16,9 @@ export interface ItemCompra {
   piezas_sueltas: number
   costo_unitario: number
   subtotal: number
+  lote?: string
+  tono?: string
+  calibre?: string
 }
 
 export interface CompraData {

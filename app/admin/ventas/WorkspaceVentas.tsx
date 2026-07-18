@@ -14,6 +14,7 @@ interface WorkspaceProps {
 
 export default function WorkspaceVentas({ inventario, ventasIniciales }: WorkspaceProps) {
   const [tabActiva, setTabActiva] = useState<'registrar' | 'historial' | 'calculadora'>('registrar')
+  const [cotizacionCargar, setCotizacionCargar] = useState<any | null>(null)
 
   // Filtramos los recubrimientos para la calculadora de obra
   const recubrimientos = inventario.filter(item => 
@@ -63,11 +64,11 @@ export default function WorkspaceVentas({ inventario, ventasIniciales }: Workspa
       <div className="transition-all duration-200">
         
         {tabActiva === 'registrar' && (
-          <RegistroVentas productos={inventario} />
+          <RegistroVentas productos={inventario} cotizacionCargar={cotizacionCargar} setCotizacionCargar={setCotizacionCargar} />
         )}
 
         {tabActiva === 'historial' && (
-          <HistorialVentas ventasIniciales={ventasIniciales} />
+          <HistorialVentas ventasIniciales={ventasIniciales} setCotizacionCargar={setCotizacionCargar} setTabActiva={setTabActiva} />
         )}
 
         {tabActiva === 'calculadora' && (

@@ -59,6 +59,10 @@ export default function KardexWorkspace({ inventario, kardexInicial }: KardexWor
   const [ajusteMotivo, setAjusteMotivo] = useState<'AJUSTE' | 'ROTURA' | 'COMPRA' | 'DEVOLUCION'>('AJUSTE')
   const [cantCajas, setCantCajas] = useState(0)
   const [cantPiezas, setCantPiezas] = useState(0)
+  
+  const [ajusteLote, setAjusteLote] = useState('')
+  const [ajusteTono, setAjusteTono] = useState('')
+  const [ajusteCalibre, setAjusteCalibre] = useState('')
 
   // Filtro de sugerencias de productos en el modal
   const productosSugeridos = inventario.filter(p =>
@@ -152,7 +156,10 @@ export default function KardexWorkspace({ inventario, kardexInicial }: KardexWor
           tipo: ajusteTipo,
           cantidad_cajas: cantCajas,
           piezas_sueltas: cantPiezas,
-          motivo: ajusteMotivo
+          motivo: ajusteMotivo,
+          lote: (productoSeleccionado.m2_caja || 0) > 0 ? ajusteLote || null : null,
+          tono: (productoSeleccionado.m2_caja || 0) > 0 ? ajusteTono || null : null,
+          calibre: (productoSeleccionado.m2_caja || 0) > 0 ? ajusteCalibre || null : null
         }
 
         await registrarMovimientoAjuste(payload)
@@ -163,6 +170,9 @@ export default function KardexWorkspace({ inventario, kardexInicial }: KardexWor
         setBusquedaProducto('')
         setCantCajas(0)
         setCantPiezas(0)
+        setAjusteLote('')
+        setAjusteTono('')
+        setAjusteCalibre('')
         setAjusteTipo('ENTRADA')
         setAjusteMotivo('AJUSTE')
         
@@ -285,6 +295,13 @@ export default function KardexWorkspace({ inventario, kardexInicial }: KardexWor
                           <span className="text-[10px] text-gray-400 uppercase font-semibold">
                             {m.inventario?.categoria || 'Sin categoría'} {m.inventario?.color ? `| Color: ${m.inventario.color}` : ''}
                           </span>
+                          {(m.lote || m.tono || m.calibre) && (
+                            <span className="text-[9px] text-[#04558C] font-semibold mt-0.5">
+                              {m.lote ? `Lote: ${m.lote} ` : ''}
+                              {m.tono ? `Tono: ${m.tono} ` : ''}
+                              {m.calibre ? `Calibre: ${m.calibre}` : ''}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="p-3 text-center">
@@ -458,28 +475,62 @@ export default function KardexWorkspace({ inventario, kardexInicial }: KardexWor
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Cantidades a Registrar</p>
                 
                 {productoSeleccionado && productoSeleccionado.m2_caja > 0 ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-bold text-gray-600 block mb-1">Cajas</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={cantCajas}
-                        onChange={e => setCantCajas(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full border p-2 rounded-lg text-gray-900 bg-white font-semibold text-center"
-                      />
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-gray-600 block mb-1">Cajas</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={cantCajas}
+                          onChange={e => setCantCajas(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full border p-2 rounded-lg text-gray-900 bg-white font-semibold text-center"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-gray-600 block mb-1">Piezas Sueltas ({getUnitLabel(productoSeleccionado)})</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={cantPiezas}
+                          onChange={e => setCantPiezas(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full border p-2 rounded-lg text-gray-900 bg-white font-semibold text-center"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-xs font-bold text-gray-600 block mb-1">Piezas Sueltas ({getUnitLabel(productoSeleccionado)})</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={cantPiezas}
-                        onChange={e => setCantPiezas(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full border p-2 rounded-lg text-gray-900 bg-white font-semibold text-center"
-                      />
+                    <div className="grid grid-cols-3 gap-3 mt-3 border-t pt-3">
+                      <div>
+                        <label className="text-xs font-bold text-gray-500 block mb-1">Lote</label>
+                        <input
+                          type="text"
+                          placeholder="Lote"
+                          value={ajusteLote || ''}
+                          onChange={e => setAjusteLote(e.target.value)}
+                          className="w-full border p-1.5 rounded-lg text-gray-900 bg-white font-medium text-center text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-gray-500 block mb-1">Tono</label>
+                        <input
+                          type="text"
+                          placeholder="Tono"
+                          value={ajusteTono || ''}
+                          onChange={e => setAjusteTono(e.target.value)}
+                          className="w-full border p-1.5 rounded-lg text-gray-900 bg-white font-medium text-center text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-gray-500 block mb-1">Calibre</label>
+                        <input
+                          type="text"
+                          placeholder="Calibre"
+                          value={ajusteCalibre || ''}
+                          onChange={e => setAjusteCalibre(e.target.value)}
+                          className="w-full border p-1.5 rounded-lg text-gray-900 bg-white font-medium text-center text-xs"
+                        />
+                      </div>
                     </div>
-                  </div>
+                  </>
                 ) : (
                   <div>
                     <label className="text-xs font-bold text-gray-600 block mb-1">

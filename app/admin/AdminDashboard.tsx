@@ -15,7 +15,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
   // Estado para guardar temporalmente lo que el usuario escribe
   const [form, setForm] = useState({
     id: '', nombre: '', categoria: 'Porcelanato', marca: '',
-    precio: 0, costo: 0, stock: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '',
+    precio: 0, costo: 0, stock: 0, stock_minimo: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '',
     oculto: false
   })
 
@@ -56,11 +56,12 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
         oculto: !!producto.oculto,
         piezas_sueltas: producto.piezas_sueltas || 0,
         m2_caja: producto.m2_caja || 0,
-        costo: producto.costo || 0
+        costo: producto.costo || 0,
+        stock_minimo: producto.stock_minimo || 0
       })
       setEsEdicion(true)
     } else {
-      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, costo: 0, stock: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '', oculto: false })
+      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, costo: 0, stock: 0, stock_minimo: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '', oculto: false })
       setEsEdicion(false)
     }
     setMostrarModal(true)
@@ -132,17 +133,37 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                   <div className="flex flex-col items-center gap-0.5">
                     {item.m2_caja > 0 ? (
                       <>
-                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${item.stock > 0 || item.piezas_sueltas > 0 ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200'}`}>
+                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                          item.stock <= (item.stock_minimo || 0)
+                            ? 'bg-red-100 text-red-800 border border-red-200'
+                            : 'bg-green-100 text-green-800 border border-green-200'
+                        }`}>
                           {item.stock} cjs {item.piezas_sueltas > 0 ? `+ ${item.piezas_sueltas} pzs` : ''}
                         </span>
+                        {item.stock <= (item.stock_minimo || 0) && (
+                          <span className="text-[9px] text-red-600 font-extrabold uppercase tracking-wide mt-0.5">
+                            ⚠️ Stock Mínimo ({item.stock_minimo || 0})
+                          </span>
+                        )}
                         <span className="text-[10px] text-gray-500 font-semibold">
                           ({(item.stock * item.m2_caja).toFixed(2)} m²)
                         </span>
                       </>
                     ) : (
-                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${item.stock > 0 ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200'}`}>
-                        {item.stock} {['mayolicas_porcelanatos', 'saldos', 'decoraciones'].includes(obtenerSeccionProducto(item)) ? 'pzs' : 'und'}
-                      </span>
+                      <>
+                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                          item.stock <= (item.stock_minimo || 0)
+                            ? 'bg-red-100 text-red-800 border border-red-200'
+                            : 'bg-green-100 text-green-800 border border-green-200'
+                        }`}>
+                          {item.stock} {['mayolicas_porcelanatos', 'saldos', 'decoraciones'].includes(obtenerSeccionProducto(item)) ? 'pzs' : 'und'}
+                        </span>
+                        {item.stock <= (item.stock_minimo || 0) && (
+                          <span className="text-[9px] text-red-600 font-extrabold uppercase tracking-wide mt-0.5">
+                            ⚠️ Stock Mínimo ({item.stock_minimo || 0})
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                 </td>
@@ -264,6 +285,11 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                     ? `Equivale a ${(form.stock * form.m2_caja).toFixed(2)} m² totales en stock` 
                     : 'Cantidad de piezas o unidades físicas en stock'}
                 </span>
+              </div>
+              <div className="col-span-2 md:col-span-1">
+                <label className="text-xs font-bold text-gray-500 block mb-1">Stock Mínimo (Alerta)</label>
+                <input required type="number" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.stock_minimo || 0} onChange={e => setForm({...form, stock_minimo: parseInt(e.target.value) || 0})} />
+                <span className="text-[10px] text-gray-400 block mt-1">Generará alerta cuando el stock sea menor o igual a este valor</span>
               </div>
               <div className="col-span-2 md:col-span-1">
                 <label className="text-xs font-bold text-gray-500 block mb-1">Rendimiento (m² por caja)</label>
