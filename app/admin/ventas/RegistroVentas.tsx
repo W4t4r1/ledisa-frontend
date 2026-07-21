@@ -1,8 +1,7 @@
-'use client'
-
 import { useState, useTransition, useEffect } from 'react'
 import { buscarCliente, guardarCliente, crearNuevaVenta, buscarClientes, buscarDniRucPeru } from './actions'
 import ComprobantePrint from '../../components/ComprobantePrint'
+import type { CompraData } from '../../lib/compras.service'
 
 interface Producto {
   id: string
@@ -29,6 +28,10 @@ interface CartItem {
   lote?: string
   tono?: string
   calibre?: string
+  es_compra_al_paso?: boolean
+  proveedor_nombre?: string
+  costo_adquisicion_al_paso?: number
+  comprobante_proveedor?: string
 }
 
 export default function RegistroVentas({ 
@@ -309,16 +312,18 @@ export default function RegistroVentas({
     // Validar stock si la venta descuenta mercadería
     if (estadoVenta !== 'COTIZACION') {
       for (const item of carrito) {
+        if (item.es_compra_al_paso) continue // Omitir bloqueo para compras al paso
+
         const prod = item.producto
         if (prod.m2_caja > 0) {
           if (prod.stock < item.cantidad_cajas || prod.piezas_sueltas < item.piezas_sueltas) {
-            alert(`⚠️ Stock insuficiente para ${prod.nombre}. Disponible: ${prod.stock} cjs, ${prod.piezas_sueltas} pzs.`);
+            alert(`⚠️ Stock insuficiente para ${prod.nombre}. Disponible: ${prod.stock} cjs, ${prod.piezas_sueltas} pzs.\n💡 Puedes activar la casilla 'Compra al Paso' si lo adquirirás de una tienda externa.`);
             return
           }
         } else {
           // Unidades
           if (prod.stock < item.piezas_sueltas) {
-            alert(`⚠️ Stock insuficiente para ${prod.nombre}. Disponible: ${prod.stock} unidades.`);
+            alert(`⚠️ Stock insuficiente para ${prod.nombre}. Disponible: ${prod.stock} unidades.\n💡 Puedes activar la casilla 'Compra al Paso' si lo adquirirás de una tienda externa.`);
             return
           }
         }
@@ -327,6 +332,42 @@ export default function RegistroVentas({
 
     startTransition(async () => {
       try {
+        // 1. Procesar Compras al Paso primero (si las hay y no es una simple cotización)
+        const itemsAlPaso = carrito.filter(i => i.es_compra_al_paso)
+        if (itemsAlPaso.length > 0 && estadoVenta !== 'COTIZACION') {
+          const { crearCompra } = await import('../compras/actions')
+          const payloadCompra: CompraData = {
+            proveedor_id: null,
+            numero_factura: itemsAlPaso[0].comprobante_proveedor || `COMPRA-PASO-${Date.now().toString().slice(-6)}`,
+            total: itemsAlPaso.reduce((sum, i) => {
+              const costo = i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0)
+              if (i.producto.m2_caja > 0) {
+                const totalM2 = (i.cantidad_cajas * i.producto.m2_caja) + (i.piezas_sueltas * (i.producto.m2_caja / (i.piezas_por_caja || 6)))
+                return sum + (totalM2 * costo)
+              } else {
+                return sum + (i.piezas_sueltas * costo)
+              }
+            }, 0),
+            metodo_pago: 'Efectivo',
+            nota: `Compra al paso automática vinculada a cliente ${clienteSeleccionado?.nombre_razon_social || 'General'} (Tienda/Prov: ${itemsAlPaso.map(i => i.proveedor_nombre || 'Externa').join(', ')})`,
+            items: itemsAlPaso.map(i => ({
+              producto_id: i.producto.id,
+              cantidad_cajas: i.cantidad_cajas,
+              piezas_sueltas: i.piezas_sueltas,
+              costo_unitario: i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0),
+              subtotal: i.producto.m2_caja > 0 
+                ? parseFloat((((i.cantidad_cajas * i.producto.m2_caja) + (i.piezas_sueltas * (i.producto.m2_caja / (i.piezas_por_caja || 6)))) * (i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0))).toFixed(2))
+                : parseFloat((i.piezas_sueltas * (i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0))).toFixed(2)),
+              lote: i.lote || null,
+              tono: i.tono || null,
+              calibre: i.calibre || null
+            }))
+          }
+
+          await crearCompra(payloadCompra)
+        }
+
+        // 2. Procesar la Venta asignando los costos reales de adquisición
         const payload = {
           cliente_id: clienteSeleccionado ? clienteSeleccionado.id : null,
           subtotal: subtotalVenta,
@@ -340,7 +381,7 @@ export default function RegistroVentas({
             cantidad_cajas: item.cantidad_cajas,
             piezas_sueltas: item.piezas_sueltas,
             precio_unitario: item.precio_unitario,
-            costo_unitario: item.costo_unitario,
+            costo_unitario: item.es_compra_al_paso ? (item.costo_adquisicion_al_paso !== undefined ? item.costo_adquisicion_al_paso : item.costo_unitario) : item.costo_unitario,
             piezas_por_caja: item.piezas_por_caja,
             subtotal: item.subtotal,
             lote: item.lote || null,
@@ -583,45 +624,64 @@ export default function RegistroVentas({
                             />
                           </div>
 
-                          {esRecubrimiento && (
-                            <>
-                              <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded w-max mt-1.5">
-                                Rendimiento: {p.m2_caja} m²/caja
-                              </span>
-                              <div className="flex gap-2 mt-2">
-                                <div className="flex flex-col">
-                                  <label className="text-[9px] font-bold text-gray-400 uppercase">Lote</label>
+                          {/* SECCIÓN COMPRA AL PASO */}
+                          <div className="mt-3 p-2 bg-amber-50/70 border border-amber-200 rounded-lg text-xs space-y-2">
+                            <label className="flex items-center gap-1.5 cursor-pointer font-bold text-amber-800 select-none">
+                              <input 
+                                type="checkbox"
+                                checked={item.es_compra_al_paso || false}
+                                onChange={e => {
+                                  actualizarItemCarrito(p.id, 'es_compra_al_paso', e.target.checked)
+                                  if (e.target.checked && item.costo_adquisicion_al_paso === undefined) {
+                                    actualizarItemCarrito(p.id, 'costo_adquisicion_al_paso', item.costo_unitario || 0)
+                                  }
+                                }}
+                                className="w-3.5 h-3.5 text-amber-600 rounded focus:ring-amber-500"
+                              />
+                              <span>🛒 Compra al Paso (Adquisición Externa)</span>
+                            </label>
+
+                            {item.es_compra_al_paso && (
+                              <div className="space-y-1.5 pt-1.5 border-t border-amber-200/80">
+                                <div>
+                                  <label className="text-[9px] font-bold text-amber-700 uppercase block">Proveedor / Tienda Externa</label>
                                   <input 
-                                    type="text" 
-                                    placeholder="Lote"
-                                    value={item.lote || ''}
-                                    onChange={e => actualizarItemCarrito(p.id, 'lote', e.target.value)}
-                                    className="border text-center w-16 p-1 rounded text-[10px] text-gray-900 bg-white"
+                                    type="text"
+                                    placeholder="Ej: Tienda Vecina / Cerámicos X"
+                                    value={item.proveedor_nombre || ''}
+                                    onChange={e => actualizarItemCarrito(p.id, 'proveedor_nombre', e.target.value)}
+                                    className="w-full border border-amber-300 p-1 rounded text-xs text-gray-900 bg-white font-medium focus:outline-none"
                                   />
                                 </div>
-                                <div className="flex flex-col">
-                                  <label className="text-[9px] font-bold text-gray-400 uppercase">Tono</label>
-                                  <input 
-                                    type="text" 
-                                    placeholder="Tono"
-                                    value={item.tono || ''}
-                                    onChange={e => actualizarItemCarrito(p.id, 'tono', e.target.value)}
-                                    className="border text-center w-14 p-1 rounded text-[10px] text-gray-900 bg-white"
-                                  />
+                                <div className="flex gap-2">
+                                  <div className="w-1/2">
+                                    <label className="text-[9px] font-bold text-amber-700 uppercase block">Costo Compra S/.</label>
+                                    <input 
+                                      type="number"
+                                      step="0.01"
+                                      placeholder="0.00"
+                                      value={item.costo_adquisicion_al_paso !== undefined ? item.costo_adquisicion_al_paso : item.costo_unitario}
+                                      onChange={e => actualizarItemCarrito(p.id, 'costo_adquisicion_al_paso', parseFloat(e.target.value) || 0)}
+                                      className="w-full border border-amber-300 p-1 rounded text-xs text-gray-900 font-bold bg-white focus:outline-none"
+                                    />
+                                  </div>
+                                  <div className="w-1/2">
+                                    <label className="text-[9px] font-bold text-amber-700 uppercase block">Comprobante Nro</label>
+                                    <input 
+                                      type="text"
+                                      placeholder="Ej: F001-1234"
+                                      value={item.comprobante_proveedor || ''}
+                                      onChange={e => actualizarItemCarrito(p.id, 'comprobante_proveedor', e.target.value)}
+                                      className="w-full border border-amber-300 p-1 rounded text-xs text-gray-900 bg-white focus:outline-none"
+                                    />
+                                  </div>
                                 </div>
-                                <div className="flex flex-col">
-                                  <label className="text-[9px] font-bold text-gray-400 uppercase">Calibre</label>
-                                  <input 
-                                    type="text" 
-                                    placeholder="Calibre"
-                                    value={item.calibre || ''}
-                                    onChange={e => actualizarItemCarrito(p.id, 'calibre', e.target.value)}
-                                    className="border text-center w-12 p-1 rounded text-[10px] text-gray-900 bg-white"
-                                  />
-                                </div>
+                                <p className="text-[9px] text-amber-600 font-medium italic">
+                                  🔒 Privado: Estos datos NO se imprimirán en el comprobante del cliente.
+                                </p>
                               </div>
-                            </>
-                          )}
+                            )}
+                          </div>
                         </div>
                       </div>
 
