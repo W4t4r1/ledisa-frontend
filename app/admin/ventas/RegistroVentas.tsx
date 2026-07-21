@@ -32,6 +32,7 @@ interface CartItem {
   proveedor_nombre?: string
   costo_adquisicion_al_paso?: number
   comprobante_proveedor?: string
+  es_producto_eventual?: boolean
 }
 
 export default function RegistroVentas({ 
@@ -59,6 +60,22 @@ export default function RegistroVentas({
     nombre_razon_social: '',
     celular: '',
     direccion: ''
+  })
+
+  // Modal de Producto Eventual / Fuera de Catálogo
+  const [mostrarModalEventual, setMostrarModalEventual] = useState(false)
+  const [formEventual, setFormEventual] = useState({
+    nombre: '',
+    categoria: 'Porcelanato',
+    m2_caja: 1.44,
+    precio_venta: 0,
+    costo_compra: 0,
+    proveedor_nombre: '',
+    cantidad_cajas: 1,
+    piezas_sueltas: 0,
+    lote: '',
+    tono: '',
+    calibre: ''
   })
 
   // Carrito de ventas
@@ -242,6 +259,73 @@ export default function RegistroVentas({
     setMostrarSugerenciasProd(false)
   }
 
+  // Agregar Producto Eventual al carrito
+  const handleAgregarProductoEventual = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!formEventual.nombre.trim()) {
+      alert('Por favor ingresa el nombre o descripción del producto eventual.')
+      return
+    }
+    if (formEventual.precio_venta <= 0) {
+      alert('Por favor ingresa un precio de venta mayor a 0.')
+      return
+    }
+
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000)
+    const fechaStr = new Date().toISOString().slice(2,10).replace(/-/g, '')
+    const idEventual = `EV-${fechaStr}-${randomSuffix}`
+
+    const productoEventual: Producto = {
+      id: idEventual,
+      nombre: formEventual.nombre.trim(),
+      categoria: formEventual.categoria,
+      marca: 'EVENTUAL',
+      precio: formEventual.precio_venta,
+      costo: formEventual.costo_compra || 0,
+      stock: 0,
+      m2_caja: formEventual.m2_caja || 0,
+      piezas_sueltas: 0
+    }
+
+    const m2Req = productoEventual.m2_caja > 0 
+      ? parseFloat(((formEventual.cantidad_cajas * productoEventual.m2_caja) + (formEventual.piezas_sueltas * (productoEventual.m2_caja / 6))).toFixed(2))
+      : 0
+
+    let sub = 0
+    if (productoEventual.m2_caja > 0) {
+      sub = parseFloat((m2Req * formEventual.precio_venta).toFixed(2))
+    } else {
+      sub = parseFloat((formEventual.piezas_sueltas * formEventual.precio_venta).toFixed(2))
+    }
+
+    const nuevoItem: CartItem = {
+      producto: productoEventual,
+      cantidad_cajas: formEventual.cantidad_cajas,
+      piezas_sueltas: formEventual.piezas_sueltas,
+      precio_unitario: formEventual.precio_venta,
+      costo_unitario: formEventual.costo_compra || 0,
+      piezas_por_caja: 6,
+      subtotal: sub,
+      m2_solicitados: m2Req,
+      lote: formEventual.lote.trim() || undefined,
+      tono: formEventual.tono.trim() || undefined,
+      calibre: formEventual.calibre.trim() || undefined,
+      es_compra_al_paso: true,
+      proveedor_nombre: formEventual.proveedor_nombre.trim() || 'Tienda Externa',
+      costo_adquisicion_al_paso: formEventual.costo_compra || 0,
+      es_producto_eventual: true
+    }
+
+    setCarrito([...carrito, nuevoItem])
+    setMostrarModalEventual(false)
+    setFormEventual({
+      nombre: '', categoria: 'Porcelanato', m2_caja: 1.44, precio_venta: 0, costo_compra: 0,
+      proveedor_nombre: '', cantidad_cajas: 1, piezas_sueltas: 0, lote: '', tono: '', calibre: ''
+    })
+    setBusquedaProd('')
+    setMostrarSugerenciasProd(false)
+  }
+
   // Actualizar cantidad o precio en carrito
   const actualizarItemCarrito = (id: string, campo: keyof CartItem, valor: any) => {
     setCarrito(carrito.map(item => {
@@ -332,6 +416,29 @@ export default function RegistroVentas({
 
     startTransition(async () => {
       try {
+        // 0. Dar de alta automáticamente los productos eventuales en el catálogo de inventario
+        const itemsEventuales = carrito.filter(i => i.es_producto_eventual)
+        if (itemsEventuales.length > 0) {
+          const { guardarProducto } = await import('../actions')
+          for (const itemEv of itemsEventuales) {
+            await guardarProducto({
+              id: itemEv.producto.id,
+              nombre: itemEv.producto.nombre,
+              categoria: itemEv.producto.categoria,
+              marca: 'EVENTUAL',
+              precio: itemEv.precio_unitario,
+              costo: itemEv.costo_adquisicion_al_paso || itemEv.costo_unitario,
+              stock: 0,
+              stock_minimo: 0,
+              m2_caja: itemEv.producto.m2_caja,
+              piezas_sueltas: 0,
+              color: null,
+              imagen: null,
+              oculto: true
+            }, false)
+          }
+        }
+
         // 1. Procesar Compras al Paso primero (si las hay y no es una simple cotización)
         const itemsAlPaso = carrito.filter(i => i.es_compra_al_paso)
         if (itemsAlPaso.length > 0 && estadoVenta !== 'COTIZACION') {
@@ -539,49 +646,76 @@ export default function RegistroVentas({
             <span>📦</span> Carrito de Compra
           </h3>
 
-          {/* Buscador de productos rápido */}
-          <div className="relative mb-6">
-            <input 
-              type="text"
-              placeholder="🔍 Escribe el nombre o código de producto para agregar..."
-              value={busquedaProd}
-              onChange={e => {
-                setBusquedaProd(e.target.value)
-                setMostrarSugerenciasProd(true)
-              }}
-              onFocus={() => setMostrarSugerenciasProd(true)}
-              className="w-full border border-gray-300 p-2.5 rounded text-gray-900 bg-white focus:outline-none focus:border-[#04558C]"
-            />
+          {/* Buscador de productos rápido y botón Eventual */}
+          <div className="flex flex-col sm:flex-row gap-2 mb-6">
+            <div className="relative flex-1">
+              <input 
+                type="text"
+                placeholder="🔍 Escribe el nombre o código de producto para agregar..."
+                value={busquedaProd}
+                onChange={e => {
+                  setBusquedaProd(e.target.value)
+                  setMostrarSugerenciasProd(true)
+                }}
+                onFocus={() => setMostrarSugerenciasProd(true)}
+                className="w-full border border-gray-300 p-2.5 rounded-lg text-gray-900 bg-white focus:outline-none focus:border-[#04558C]"
+              />
 
-            {/* Listado de sugerencias flotantes */}
-            {mostrarSugerenciasProd && busquedaProd.trim() !== '' && (
-              <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-20 max-h-60 overflow-y-auto divide-y">
-                {productosSugeridos.length === 0 ? (
-                  <p className="p-3 text-sm text-gray-500 italic">No se encontraron productos.</p>
-                ) : (
-                  productosSugeridos.map(p => (
-                    <div 
-                      key={p.id}
-                      onClick={() => agregarAlCarrito(p)}
-                      className="p-3 hover:bg-gray-50 cursor-pointer flex justify-between items-center transition-colors"
-                    >
-                      <div>
-                        <p className="text-sm font-bold text-gray-800">{p.nombre}</p>
-                        <p className="text-xs text-gray-500 font-mono">Cód: {p.id} | Marca: {p.marca}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-[#04558C]">S/. {p.precio}</p>
-                        <p className="text-[10px] text-gray-400">
-                          {p.m2_caja > 0 
-                            ? `Stock: ${p.stock} cjs / ${p.piezas_sueltas} pzs` 
-                            : `Stock: ${p.stock} und`}
-                        </p>
-                      </div>
+              {/* Listado de sugerencias flotantes */}
+              {mostrarSugerenciasProd && busquedaProd.trim() !== '' && (
+                <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto divide-y">
+                  {productosSugeridos.length === 0 ? (
+                    <div className="p-4 text-center space-y-2">
+                      <p className="text-sm text-gray-500 italic">No se encontró "{busquedaProd}" en el catálogo.</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormEventual(prev => ({ ...prev, nombre: busquedaProd }))
+                          setMostrarModalEventual(true)
+                          setMostrarSugerenciasProd(false)
+                        }}
+                        className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3 py-2 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                      >
+                        ➕ Crear Producto Eventual / Fuera de Catálogo
+                      </button>
                     </div>
-                  ))
-                )}
-              </div>
-            )}
+                  ) : (
+                    productosSugeridos.map(p => (
+                      <div 
+                        key={p.id}
+                        onClick={() => agregarAlCarrito(p)}
+                        className="p-3 hover:bg-gray-50 cursor-pointer flex justify-between items-center transition-colors"
+                      >
+                        <div>
+                          <p className="text-sm font-bold text-gray-800">{p.nombre}</p>
+                          <p className="text-xs text-gray-500 font-mono">Cód: {p.id} | Marca: {p.marca}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-[#04558C]">S/. {p.precio}</p>
+                          <p className="text-[10px] text-gray-400">
+                            {p.m2_caja > 0 
+                              ? `Stock: ${p.stock} cjs / ${p.piezas_sueltas} pzs` 
+                              : `Stock: ${p.stock} und`}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setFormEventual(prev => ({ ...prev, nombre: busquedaProd }))
+                setMostrarModalEventual(true)
+              }}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center justify-center gap-1.5 shadow-sm"
+              title="Vender un producto fuera de catálogo adquirido por encargo"
+            >
+              <span>➕</span> Producto Eventual
+            </button>
           </div>
 
           {/* Lista del carrito */}
@@ -1098,6 +1232,188 @@ export default function RegistroVentas({
         </div>
       )}
 
+      {/* --- MODAL PRODUCTO EVENTUAL / FUERA DE CATÁLOGO --- */}
+      {mostrarModalEventual && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-2xl overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-center border-b pb-3 mb-4">
+              <h3 className="text-lg font-bold text-amber-800 flex items-center gap-2">
+                <span>➕</span> Producto Eventual / Fuera de Catálogo
+              </h3>
+              <button 
+                type="button"
+                onClick={() => setMostrarModalEventual(false)}
+                className="text-gray-400 hover:text-gray-600 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAgregarProductoEventual} className="space-y-4 text-xs text-gray-900">
+              <div>
+                <label className="font-bold text-gray-600 block mb-1">Nombre / Descripción del Producto*</label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="Ej: Porcelanato Negro Abrillantado 60x60"
+                  value={formEventual.nombre}
+                  onChange={e => setFormEventual({ ...formEventual, nombre: e.target.value })}
+                  className="w-full border p-2.5 rounded-lg text-gray-900 bg-white font-semibold focus:outline-none focus:border-amber-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-gray-600 block mb-1">Categoría</label>
+                  <select 
+                    value={formEventual.categoria}
+                    onChange={e => setFormEventual({ ...formEventual, categoria: e.target.value })}
+                    className="w-full border p-2 rounded-lg bg-white text-gray-900 font-semibold focus:outline-none"
+                  >
+                    <option value="Porcelanato">Porcelanato</option>
+                    <option value="Mayólica">Mayólica</option>
+                    <option value="Sanitario">Sanitario</option>
+                    <option value="Grifería">Grifería</option>
+                    <option value="Decorado">Decorado</option>
+                    <option value="Otros">Otros</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="font-bold text-gray-600 block mb-1">Rendimiento (m²/caja)</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Ej: 1.44"
+                    value={formEventual.m2_caja}
+                    onChange={e => setFormEventual({ ...formEventual, m2_caja: parseFloat(e.target.value) || 0 })}
+                    className="w-full border p-2 rounded-lg text-gray-900 bg-white focus:outline-none"
+                  />
+                  <span className="text-[9px] text-gray-400 block mt-0.5">Dejar en 0 si es por unidades</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 bg-amber-50/50 p-3 rounded-lg border border-amber-200">
+                <div>
+                  <label className="font-bold text-amber-800 block mb-1">Precio de Venta S/.*</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="0.00"
+                    value={formEventual.precio_venta || ''}
+                    onChange={e => setFormEventual({ ...formEventual, precio_venta: parseFloat(e.target.value) || 0 })}
+                    className="w-full border border-amber-300 p-2 rounded-lg text-gray-900 bg-white font-bold focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-amber-800 block mb-1">Costo de Compra S/.*</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="0.00"
+                    value={formEventual.costo_compra || ''}
+                    onChange={e => setFormEventual({ ...formEventual, costo_compra: parseFloat(e.target.value) || 0 })}
+                    className="w-full border border-amber-300 p-2 rounded-lg text-gray-900 bg-white font-bold focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-gray-600 block mb-1">Proveedor / Tienda Externa</label>
+                  <input 
+                    type="text"
+                    placeholder="Ej: Tienda Vecina / Cerámicos X"
+                    value={formEventual.proveedor_nombre}
+                    onChange={e => setFormEventual({ ...formEventual, proveedor_nombre: e.target.value })}
+                    className="w-full border p-2 rounded-lg text-gray-900 bg-white font-medium focus:outline-none"
+                  />
+                </div>
+                <div>
+                  {formEventual.m2_caja > 0 ? (
+                    <div>
+                      <label className="font-bold text-gray-600 block mb-1">Cantidad Cajas</label>
+                      <input 
+                        type="number"
+                        min="1"
+                        value={formEventual.cantidad_cajas}
+                        onChange={e => setFormEventual({ ...formEventual, cantidad_cajas: Math.max(1, parseInt(e.target.value) || 1) })}
+                        className="w-full border p-2 rounded-lg text-gray-900 bg-white font-bold focus:outline-none"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="font-bold text-gray-600 block mb-1">Cantidad Unidades</label>
+                      <input 
+                        type="number"
+                        min="1"
+                        value={formEventual.piezas_sueltas}
+                        onChange={e => setFormEventual({ ...formEventual, piezas_sueltas: Math.max(1, parseInt(e.target.value) || 1) })}
+                        className="w-full border p-2 rounded-lg text-gray-900 bg-white font-bold focus:outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="font-bold text-gray-500 block mb-0.5">Lote</label>
+                  <input 
+                    type="text"
+                    placeholder="Opcional"
+                    value={formEventual.lote}
+                    onChange={e => setFormEventual({ ...formEventual, lote: e.target.value })}
+                    className="w-full border p-1.5 rounded-lg text-gray-900 bg-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-gray-500 block mb-0.5">Tono</label>
+                  <input 
+                    type="text"
+                    placeholder="Opcional"
+                    value={formEventual.tono}
+                    onChange={e => setFormEventual({ ...formEventual, tono: e.target.value })}
+                    className="w-full border p-1.5 rounded-lg text-gray-900 bg-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-gray-500 block mb-0.5">Calibre</label>
+                  <input 
+                    type="text"
+                    placeholder="Opcional"
+                    value={formEventual.calibre}
+                    onChange={e => setFormEventual({ ...formEventual, calibre: e.target.value })}
+                    className="w-full border p-1.5 rounded-lg text-gray-900 bg-white focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <p className="text-[10px] text-amber-700 italic bg-amber-50 p-2 rounded border border-amber-200">
+                🔒 El producto se dará de alta automáticamente en el inventario como oculto y se procesará la compra/venta simultánea. El comprobante impreso para el cliente mostrará exclusivamente los datos de LEDISA.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalEventual(false)}
+                  className="px-4 py-2 border rounded-lg text-gray-600 font-bold hover:bg-gray-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow-sm transition-colors"
+                >
+                  🛒 Agregar al Carrito
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
