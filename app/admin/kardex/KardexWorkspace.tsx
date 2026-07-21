@@ -14,6 +14,9 @@ interface MovimientoKardex {
   motivo: 'VENTA' | 'COMPRA' | 'AJUSTE' | 'ROTURA' | 'DEVOLUCION' | 'ANULACION_VENTA'
   referencia_id: string | null
   fecha: string
+  lote?: string | null
+  tono?: string | null
+  calibre?: string | null
   inventario?: {
     nombre: string
     categoria: string
