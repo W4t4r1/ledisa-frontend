@@ -78,6 +78,19 @@ export default function RegistroVentas({
     calibre: ''
   })
 
+  // Modal Calculadora Integrada de m² y Materiales Complementarios
+  const [mostrarModalCalc, setMostrarModalCalc] = useState(false)
+  const [prodCalcId, setProdCalcId] = useState<string>('')
+  const [modoCalc, setModoCalc] = useState<'dimensiones' | 'directo'>('dimensiones')
+  const [largoM, setLargoM] = useState<number>(4)
+  const [anchoM, setAnchoM] = useState<number>(5)
+  const [m2DirectoCalc, setM2DirectoCalc] = useState<number>(20)
+  const [mermaPct, setMermaPct] = useState<number>(10)
+  const [pegamentoSelId, setPegamentoSelId] = useState<string>('')
+  const [fraguaSelId, setFraguaSelId] = useState<string>('')
+  const [incluirPegamento, setIncluirPegamento] = useState(true)
+  const [incluirFragua, setIncluirFragua] = useState(true)
+
   // Carrito de ventas
   const [carrito, setCarrito] = useState<CartItem[]>([])
   
@@ -328,6 +341,134 @@ export default function RegistroVentas({
     })
     setBusquedaProd('')
     setMostrarSugerenciasProd(false)
+  }
+
+  // Listas de productos complementarios para la calculadora
+  const listaPegamentos = productos.filter(p => 
+    p.nombre.toLowerCase().includes('pegamento') || 
+    p.nombre.toLowerCase().includes('adhesivo') || 
+    p.categoria.toLowerCase().includes('pegamento') ||
+    p.categoria.toLowerCase().includes('adhesivo')
+  )
+
+  const listaFraguas = productos.filter(p => 
+    p.nombre.toLowerCase().includes('fragua') || 
+    p.categoria.toLowerCase().includes('fragua')
+  )
+
+  // Criterios de cálculo dinámico para el modal de calculadora
+  const m2BaseCalc = modoCalc === 'dimensiones' ? (largoM * anchoM) : m2DirectoCalc
+  const m2TotalesCalc = parseFloat((m2BaseCalc * (1 + mermaPct / 100)).toFixed(2))
+
+  const productoSelCalc = productos.find(p => p.id === prodCalcId) || productos.find(p => p.m2_caja > 0) || productos[0]
+  const m2CajaCalc = productoSelCalc?.m2_caja || 1.44
+  const pzsPorCajaCalc = 6
+
+  let cajasReqCalc = 0
+  let piezasReqCalc = 0
+  if (m2CajaCalc > 0) {
+    const totalCajasFloat = m2TotalesCalc / m2CajaCalc
+    cajasReqCalc = Math.floor(totalCajasFloat)
+    const m2Restantes = m2TotalesCalc - (cajasReqCalc * m2CajaCalc)
+    if (m2Restantes > 0) {
+      const m2PorPieza = m2CajaCalc / pzsPorCajaCalc
+      piezasReqCalc = Math.ceil(m2Restantes / m2PorPieza)
+      if (piezasReqCalc >= pzsPorCajaCalc) {
+        cajasReqCalc += 1
+        piezasReqCalc = 0
+      }
+    }
+  }
+
+  const sacosPegamentoReq = Math.ceil(m2TotalesCalc / 4.5) // 1 saco 25kg rinde 4.5 m2
+  const kgFraguaReq = Math.ceil(m2TotalesCalc / 4.0) // 1 kg rinde 4.0 m2
+
+  // Inyectar Paquete Completo Calculado al Carrito
+  const handleAgregarPaqueteCalculado = () => {
+    if (!productoSelCalc) return
+
+    const nuevosItems: CartItem[] = []
+
+    // 1. Cerámico / Porcelanato
+    const m2SolicitadosTile = productoSelCalc.m2_caja > 0 
+      ? parseFloat(((cajasReqCalc * productoSelCalc.m2_caja) + (piezasReqCalc * (productoSelCalc.m2_caja / pzsPorCajaCalc))).toFixed(2))
+      : 0
+
+    let subtotalTile = 0
+    if (productoSelCalc.m2_caja > 0) {
+      subtotalTile = parseFloat((m2SolicitadosTile * productoSelCalc.precio).toFixed(2))
+    } else {
+      subtotalTile = parseFloat((piezasReqCalc * productoSelCalc.precio).toFixed(2))
+    }
+
+    const existeTile = carrito.find(item => item.producto.id === productoSelCalc.id)
+    if (existeTile) {
+      actualizarItemCarrito(productoSelCalc.id, 'cantidad_cajas', existeTile.cantidad_cajas + cajasReqCalc)
+      actualizarItemCarrito(productoSelCalc.id, 'piezas_sueltas', existeTile.piezas_sueltas + piezasReqCalc)
+    } else {
+      nuevosItems.push({
+        producto: productoSelCalc,
+        cantidad_cajas: cajasReqCalc,
+        piezas_sueltas: piezasReqCalc,
+        precio_unitario: productoSelCalc.precio,
+        costo_unitario: productoSelCalc.costo || 0,
+        piezas_por_caja: pzsPorCajaCalc,
+        subtotal: subtotalTile,
+        m2_solicitados: m2SolicitadosTile
+      })
+    }
+
+    // 2. Pegamento
+    const pegamentoTargetId = pegamentoSelId || (listaPegamentos[0]?.id || '')
+    if (incluirPegamento && pegamentoTargetId && sacosPegamentoReq > 0) {
+      const prodPeg = productos.find(p => p.id === pegamentoTargetId)
+      if (prodPeg) {
+        const existePeg = carrito.find(item => item.producto.id === prodPeg.id)
+        if (existePeg) {
+          actualizarItemCarrito(prodPeg.id, 'piezas_sueltas', existePeg.piezas_sueltas + sacosPegamentoReq)
+        } else {
+          nuevosItems.push({
+            producto: prodPeg,
+            cantidad_cajas: 0,
+            piezas_sueltas: sacosPegamentoReq,
+            precio_unitario: prodPeg.precio,
+            costo_unitario: prodPeg.costo || 0,
+            piezas_por_caja: 1,
+            subtotal: parseFloat((sacosPegamentoReq * prodPeg.precio).toFixed(2)),
+            m2_solicitados: 0
+          })
+        }
+      }
+    }
+
+    // 3. Fragua
+    const fraguaTargetId = fraguaSelId || (listaFraguas[0]?.id || '')
+    if (incluirFragua && fraguaTargetId && kgFraguaReq > 0) {
+      const prodFra = productos.find(p => p.id === fraguaTargetId)
+      if (prodFra) {
+        const existeFra = carrito.find(item => item.producto.id === prodFra.id)
+        if (existeFra) {
+          actualizarItemCarrito(prodFra.id, 'piezas_sueltas', existeFra.piezas_sueltas + kgFraguaReq)
+        } else {
+          nuevosItems.push({
+            producto: prodFra,
+            cantidad_cajas: 0,
+            piezas_sueltas: kgFraguaReq,
+            precio_unitario: prodFra.precio,
+            costo_unitario: prodFra.costo || 0,
+            piezas_por_caja: 1,
+            subtotal: parseFloat((kgFraguaReq * prodFra.precio).toFixed(2)),
+            m2_solicitados: 0
+          })
+        }
+      }
+    }
+
+    if (nuevosItems.length > 0) {
+      setCarrito(prev => [...prev, ...nuevosItems])
+    }
+    setMostrarModalCalc(false)
+    alert('✅ Paquete calculado y agregado al carrito exitosamente.')
   }
 
   // Actualizar cantidad o precio en carrito
@@ -712,6 +853,20 @@ export default function RegistroVentas({
                 </div>
               )}
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (!prodCalcId && productos.find(p => p.m2_caja > 0)) {
+                  setProdCalcId(productos.find(p => p.m2_caja > 0)?.id || '')
+                }
+                setMostrarModalCalc(true)
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3.5 py-2.5 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center justify-center gap-1.5 shadow-sm"
+              title="Calcular metros cuadrados, merma y pegamento/fragua"
+            >
+              <span>🧮</span> Calculadora m²
+            </button>
 
             <button
               type="button"
@@ -1259,6 +1414,231 @@ export default function RegistroVentas({
       {ventaExito && (
         <div className="hidden print:block">
           <ComprobantePrint venta={ventaExito} />
+        </div>
+      )}
+
+      {/* --- MODAL CALCULADORA INTEGRADA DE M² Y MATERIALES --- */}
+      {mostrarModalCalc && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-xl shadow-2xl overflow-y-auto max-h-[90vh] text-xs text-gray-900">
+            <div className="flex justify-between items-center border-b pb-3 mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-[#04558C] flex items-center gap-2">
+                  <span>🧮</span> Calculadora de m² y Materiales Complementarios
+                </h3>
+                <p className="text-[11px] text-gray-500 font-medium">Calcula las cajas exactas e inyecta Pegamento y Fragua al carrito en 1 clic.</p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setMostrarModalCalc(false)}
+                className="text-gray-400 hover:text-gray-600 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* 1. Seleccionar Cerámico */}
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">1. Selecciona el Cerámico / Porcelanato</label>
+                <select
+                  value={prodCalcId}
+                  onChange={e => setProdCalcId(e.target.value)}
+                  className="w-full border border-gray-300 p-2.5 rounded-lg bg-white font-bold text-gray-900 focus:outline-none focus:border-[#04558C]"
+                >
+                  {productos.filter(p => p.m2_caja > 0).map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre} ({p.m2_caja} m²/caja) — S/. {p.precio}/m²
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 2. Área y Merma */}
+              <div className="bg-blue-50/60 p-4 rounded-xl border border-blue-200 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-[#04558C]">2. Área del Ambiente y Merma</span>
+                  <div className="flex bg-white rounded-lg border p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setModoCalc('dimensiones')}
+                      className={`px-3 py-1 rounded text-[11px] font-bold transition-colors ${modoCalc === 'dimensiones' ? 'bg-[#04558C] text-white' : 'text-gray-600'}`}
+                    >
+                      Largo × Ancho
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModoCalc('directo')}
+                      className={`px-3 py-1 rounded text-[11px] font-bold transition-colors ${modoCalc === 'directo' ? 'bg-[#04558C] text-white' : 'text-gray-600'}`}
+                    >
+                      m² Directos
+                    </button>
+                  </div>
+                </div>
+
+                {modoCalc === 'dimensiones' ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold text-gray-600 block mb-1">Largo (metros)</label>
+                      <input 
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        value={largoM}
+                        onChange={e => setLargoM(parseFloat(e.target.value) || 0)}
+                        className="w-full border p-2 rounded-lg text-gray-900 bg-white font-semibold text-center"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-gray-600 block mb-1">Ancho (metros)</label>
+                      <input 
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        value={anchoM}
+                        onChange={e => setAnchoM(parseFloat(e.target.value) || 0)}
+                        className="w-full border p-2 rounded-lg text-gray-900 bg-white font-semibold text-center"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="font-bold text-gray-600 block mb-1">Superficie Total (m²)</label>
+                    <input 
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={m2DirectoCalc}
+                      onChange={e => setM2DirectoCalc(parseFloat(e.target.value) || 0)}
+                      className="w-full border p-2 rounded-lg text-gray-900 bg-white font-bold text-center text-sm"
+                    />
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-2 border-t border-blue-200">
+                  <div className="flex items-center gap-2">
+                    <label className="font-bold text-gray-600">Merma de Corte:</label>
+                    <select
+                      value={mermaPct}
+                      onChange={e => setMermaPct(parseInt(e.target.value) || 0)}
+                      className="border p-1.5 rounded-lg bg-white font-bold text-gray-900"
+                    >
+                      <option value={5}>5% (Corte recto)</option>
+                      <option value={10}>10% (Estándar recomendado)</option>
+                      <option value={15}>15% (Instalación diagonal)</option>
+                    </select>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-gray-500 block uppercase font-bold">m² Totales Requeridos</span>
+                    <span className="text-base font-black text-[#04558C] font-mono">{m2TotalesCalc} m²</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Resultado Cerámico */}
+              <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 flex justify-between items-center">
+                <div>
+                  <span className="font-bold text-amber-900 block text-xs">Cajas + Piezas Necesarias</span>
+                  <span className="text-[11px] text-amber-700 font-medium">Rendimiento: {m2CajaCalc} m²/caja</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-base font-black text-amber-900 font-mono">
+                    {cajasReqCalc} cjs {piezasReqCalc > 0 ? `+ ${piezasReqCalc} pzs` : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* 3. Materiales Complementarios */}
+              <div className="space-y-3 pt-2">
+                <span className="font-bold text-gray-700 block">3. Materiales Complementarios Recomendados</span>
+
+                {/* Pegamento */}
+                <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <label className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        checked={incluirPegamento}
+                        onChange={e => setIncluirPegamento(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                      <span>sacos de Pegamento / Adhesivo (25kg)</span>
+                    </label>
+                    <span className="font-mono font-bold text-blue-700 text-sm">{sacosPegamentoReq} sacos</span>
+                  </div>
+                  {incluirPegamento && (
+                    <select
+                      value={pegamentoSelId || (listaPegamentos[0]?.id || '')}
+                      onChange={e => setPegamentoSelId(e.target.value)}
+                      className="w-full border p-2 rounded bg-white text-gray-900 font-semibold"
+                    >
+                      {listaPegamentos.length === 0 ? (
+                        <option value="">No hay pegamentos en catálogo (Usar genérico)</option>
+                      ) : (
+                        listaPegamentos.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.nombre} — S/. {p.precio}/saco
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  )}
+                </div>
+
+                {/* Fragua */}
+                <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <label className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        checked={incluirFragua}
+                        onChange={e => setIncluirFragua(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                      <span>kg de Fragua / Junta</span>
+                    </label>
+                    <span className="font-mono font-bold text-blue-700 text-sm">{kgFraguaReq} kg</span>
+                  </div>
+                  {incluirFragua && (
+                    <select
+                      value={fraguaSelId || (listaFraguas[0]?.id || '')}
+                      onChange={e => setFraguaSelId(e.target.value)}
+                      className="w-full border p-2 rounded bg-white text-gray-900 font-semibold"
+                    >
+                      {listaFraguas.length === 0 ? (
+                        <option value="">No hay fraguas en catálogo (Usar genérico)</option>
+                      ) : (
+                        listaFraguas.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.nombre} — S/. {p.precio}/kg
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* Botón Inyección al Carrito */}
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalCalc(false)}
+                  className="px-4 py-2 border rounded-lg text-gray-600 font-bold hover:bg-gray-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAgregarPaqueteCalculado}
+                  className="px-5 py-2.5 bg-[#04558C] hover:bg-[#033f6b] text-white rounded-lg font-bold shadow-md transition-colors flex items-center gap-2 text-xs cursor-pointer"
+                >
+                  <span>🛒</span> Agregar Cerámico + Pegamento + Fragua al Carrito
+                </button>
+              </div>
+
+            </div>
+          </div>
         </div>
       )}
 

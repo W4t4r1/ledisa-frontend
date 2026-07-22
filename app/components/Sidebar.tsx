@@ -12,8 +12,6 @@ export default function Sidebar() {
   const links = [
     { href: '/admin/dashboard', label: '📊 Dashboard KPI' },
     { href: '/admin', label: '📦 Gestión de Inventario' },
-    { href: '/admin/calculadora', label: '📐 Calculadora de Obra' },
-    { href: '/admin/consultor', label: '🧠 Consultor IA' },
     { href: '/admin/ventas', label: '⚡ Workspace de Ventas' },
     { href: '/admin/clientes', label: '👥 Gestión de Clientes (CRM)' },
     { href: '/admin/kardex', label: '📈 Kardex de Inventario' },

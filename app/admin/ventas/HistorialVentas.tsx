@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { obtenerDetalle } from './actions'
 import ComprobantePrint from '../../components/ComprobantePrint'
+import GuiaDespachoPrint from '../../components/GuiaDespachoPrint'
 
 interface Venta {
   id: string
@@ -38,6 +39,7 @@ export default function HistorialVentas({
 
   // Estado para impresión
   const [ventaImprimir, setVentaImprimir] = useState<any | null>(null)
+  const [ventaImprimirGuia, setVentaImprimirGuia] = useState<any | null>(null)
 
   // Filtrado en memoria
   const ventasFiltradas = ventasIniciales.filter(v => {
@@ -52,24 +54,33 @@ export default function HistorialVentas({
     return codigoMatch || clienteNombreMatch || clienteDocMatch || metodoMatch
   })
 
-  // Cargar detalles de una venta específica para impresión y dispararla
   const handleImprimirVenta = async (venta: Venta) => {
     try {
-      if (ventaSeleccionada?.id === venta.id && detalles) {
-        setVentaImprimir({ ...venta, items: detalles })
-        setTimeout(() => {
-          window.print()
-        }, 150)
-        return
-      }
-
       const resDetalles = await obtenerDetalle(venta.id)
-      setVentaImprimir({ ...venta, items: resDetalles })
+      setVentaImprimir({
+        ...venta,
+        items: resDetalles
+      })
       setTimeout(() => {
         window.print()
-      }, 150)
+      }, 300)
     } catch (err: any) {
-      alert('❌ Error al cargar comprobante para impresión: ' + err.message)
+      alert('❌ Error al preparar comprobante: ' + err.message)
+    }
+  }
+
+  const handleImprimirGuia = async (venta: Venta) => {
+    try {
+      const resDetalles = await obtenerDetalle(venta.id)
+      setVentaImprimirGuia({
+        ...venta,
+        items: resDetalles
+      })
+      setTimeout(() => {
+        window.print()
+      }, 300)
+    } catch (err: any) {
+      alert('❌ Error al preparar guía de despacho: ' + err.message)
     }
   }
 
@@ -179,6 +190,15 @@ export default function HistorialVentas({
                       >
                         🖨️ Imprimir
                       </button>
+                      {v.estado !== 'COTIZACION' && (
+                        <button 
+                          onClick={() => handleImprimirGuia(v)}
+                          className="text-indigo-700 hover:text-indigo-900 font-bold text-xs bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
+                          title="Imprimir Guía de Despacho para Almacenero"
+                        >
+                          🚛 Guía
+                        </button>
+                      )}
                       {v.estado === 'COTIZACION' && (
                         <button 
                           onClick={async () => {
@@ -371,13 +391,19 @@ export default function HistorialVentas({
         </div>
       )}
 
-      {/* COMPROBANTE OCULTO PARA IMPRESIÓN */}
+      {/* CONTENEDOR OCULTO PARA IMPRESIÓN DE COMPROBANTES */}
       {ventaImprimir && (
         <div className="hidden print:block">
           <ComprobantePrint venta={ventaImprimir} />
         </div>
       )}
 
+      {/* CONTENEDOR OCULTO PARA IMPRESIÓN DE GUÍAS DE DESPACHO */}
+      {ventaImprimirGuia && (
+        <div className="hidden print:block">
+          <GuiaDespachoPrint venta={ventaImprimirGuia} />
+        </div>
+      )}
     </div>
   )
 }

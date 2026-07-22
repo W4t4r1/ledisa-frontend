@@ -34,6 +34,7 @@ export async function guardarProducto(productoBase: any, esEdicion: boolean) {
     piezas_sueltas: parseInt(productoBase.piezas_sueltas || 0),
     color: productoBase.color?.trim() || null,
     imagen: productoBase.imagen?.trim() || null,
+    ubicacion_fisica: productoBase.ubicacion_fisica?.trim() || null,
     oculto: !!productoBase.oculto
   }
 

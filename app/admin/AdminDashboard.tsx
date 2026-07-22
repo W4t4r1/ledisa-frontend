@@ -16,7 +16,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
   const [form, setForm] = useState({
     id: '', nombre: '', categoria: 'Porcelanato', marca: '',
     precio: 0, costo: 0, stock: 0, stock_minimo: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '',
-    oculto: false
+    ubicacion_fisica: '', oculto: false
   })
 
   // Filtro rápido en memoria
@@ -57,11 +57,12 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
         piezas_sueltas: producto.piezas_sueltas || 0,
         m2_caja: producto.m2_caja || 0,
         costo: producto.costo || 0,
-        stock_minimo: producto.stock_minimo || 0
+        stock_minimo: producto.stock_minimo || 0,
+        ubicacion_fisica: producto.ubicacion_fisica || ''
       })
       setEsEdicion(true)
     } else {
-      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, costo: 0, stock: 0, stock_minimo: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '', oculto: false })
+      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, costo: 0, stock: 0, stock_minimo: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '', ubicacion_fisica: '', oculto: false })
       setEsEdicion(false)
     }
     setMostrarModal(true)
@@ -118,13 +119,19 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
             {productosFiltrados.map((item) => (
               <tr key={item.id} className={`hover:bg-gray-50 transition-colors ${item.oculto ? 'opacity-60 bg-gray-50/50' : ''}`}>
                 <td className="p-3 text-sm font-mono text-gray-500">{item.id}</td>
-                <td className="p-3 font-medium text-gray-800">
-                  <div className="flex items-center gap-2">
-                    <span>{item.nombre}</span>
-                    {item.oculto && (
-                      <span className="text-[10px] bg-gray-400 text-white font-bold px-1.5 py-0.5 rounded tracking-wide">OCULTO</span>
+                <td className="p-3">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-gray-800">{item.nombre}</span>
+                      {item.oculto && (
+                        <span className="text-[10px] bg-gray-400 text-white font-bold px-1.5 py-0.5 rounded tracking-wide">OCULTO</span>
+                      )}
+                    </div>
+                    {item.ubicacion_fisica && (
+                      <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded border border-indigo-200 w-max mt-1">
+                        📍 {item.ubicacion_fisica}
+                      </span>
                     )}
-                    {item.color && <span className="ml-2 text-xs bg-gray-200 text-gray-600 px-1 rounded">{item.color}</span>}
                   </div>
                 </td>
                 <td className="p-3 text-right font-medium text-gray-500">S/. {item.costo || '0.00'}</td>
@@ -308,6 +315,21 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
               <div className="col-span-2 md:col-span-1">
                 <label className="text-xs font-bold text-gray-500 block mb-1">Imagen URL (Opcional)</label>
                 <input type="text" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.imagen || ''} onChange={e => setForm({...form, imagen: e.target.value})} />
+              </div>
+              <div className="col-span-2 md:col-span-1">
+                <label className="text-xs font-bold text-gray-500 block mb-1">📍 Ubicación Física Interna</label>
+                <select 
+                  className="w-full border p-2 rounded text-gray-900 bg-white font-semibold" 
+                  value={form.ubicacion_fisica || ''} 
+                  onChange={e => setForm({...form, ubicacion_fisica: e.target.value})}
+                >
+                  <option value="">-- Sin especificar --</option>
+                  <option value="Cuarto 1">Cuarto 1</option>
+                  <option value="Cuarto 2">Cuarto 2</option>
+                  <option value="Almacén Fondo">Almacén Fondo</option>
+                  <option value="2do Piso">2do Piso</option>
+                  <option value="Exhibición">Exhibición</option>
+                </select>
               </div>
               <div className="col-span-2 flex items-center gap-2 py-2">
                 <input 
