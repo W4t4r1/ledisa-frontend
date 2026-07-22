@@ -595,18 +595,34 @@ BEGIN
 
         IF p_estado IN ('PAGADO', 'ENTREGADO') THEN
             IF v_m2_caja > 0 THEN
-                IF v_stock_actual < v_cant_cajas OR v_pzs_actual < v_pzs_sueltas THEN
-                    RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % cjs, % pzs. Requerido % cjs, % pzs.', 
-                        v_nombre_prod, v_producto_id, v_stock_actual, v_pzs_actual, v_cant_cajas, v_pzs_sueltas;
-                END IF;
+                DECLARE
+                    v_pzs_faltantes INT := 0;
+                    v_cajas_a_abrir INT := 0;
+                    v_pzs_totales_disp INT;
+                    v_pzs_totales_req INT;
+                BEGIN
+                    v_pzs_totales_disp := (v_stock_actual * v_pzs_por_caja) + v_pzs_actual;
+                    v_pzs_totales_req := (v_cant_cajas * v_pzs_por_caja) + v_pzs_sueltas;
 
-                UPDATE inventario 
-                SET stock = stock - v_cant_cajas,
-                    piezas_sueltas = piezas_sueltas - v_pzs_sueltas
-                WHERE id = v_producto_id;
+                    IF v_pzs_totales_disp < v_pzs_totales_req THEN
+                        RAISE EXCEPTION 'Stock insuficiente para % (%): stock total disp. % pzs (% cjs + % pzs). Requerido % pzs (% cjs + % pzs).', 
+                            v_nombre_prod, v_producto_id, v_pzs_totales_disp, v_stock_actual, v_pzs_actual, v_pzs_totales_req, v_cant_cajas, v_pzs_sueltas;
+                    END IF;
 
-                INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
-                VALUES (v_producto_id, 'SALIDA', v_cant_cajas, v_pzs_sueltas, 'VENTA', v_venta_id);
+                    -- Si las piezas sueltas disponibles no alcanzan, abrimos las cajas necesarias automáticamente
+                    IF v_pzs_actual < v_pzs_sueltas THEN
+                        v_pzs_faltantes := v_pzs_sueltas - v_pzs_actual;
+                        v_cajas_a_abrir := CEIL(v_pzs_faltantes::NUMERIC / v_pzs_por_caja::NUMERIC)::INT;
+                    END IF;
+
+                    UPDATE inventario 
+                    SET stock = stock - v_cant_cajas - v_cajas_a_abrir,
+                        piezas_sueltas = piezas_sueltas + (v_cajas_a_abrir * v_pzs_por_caja) - v_pzs_sueltas
+                    WHERE id = v_producto_id;
+
+                    INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                    VALUES (v_producto_id, 'SALIDA', v_cant_cajas + v_cajas_a_abrir, v_pzs_sueltas, 'VENTA', v_venta_id);
+                END;
             ELSE
                 IF v_stock_actual < v_pzs_sueltas THEN
                     RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % unidades. Requerido % unidades.', 

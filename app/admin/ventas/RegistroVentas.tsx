@@ -98,6 +98,9 @@ export default function RegistroVentas({
 
   // Estado para comprobante de éxito e impresión
   const [ventaExito, setVentaExito] = useState<any | null>(null)
+  
+  // Código de cotización cargada en edición
+  const [cotizacionOrigenCod, setCotizacionOrigenCod] = useState<string | null>(null)
 
   // Filtrar productos sugeridos para el carrito
   const productosSugeridos = productos.filter(p => 
@@ -155,7 +158,8 @@ export default function RegistroVentas({
       setDescuento(cotizacionCargar.descuento || 0)
       setNota(cotizacionCargar.nota || '')
       setMetodoPago(cotizacionCargar.metodo_pago || 'Efectivo')
-      setEstadoVenta('PAGADO') // Se carga para pagarse/facturarse
+      setEstadoVenta('PAGADO') // Se carga por defecto para facturarse
+      setCotizacionOrigenCod(cotizacionCargar.codigo_venta || null)
       
       // Limpiar cotización del estado compartido para evitar loops
       setCotizacionCargar(null)
@@ -400,8 +404,12 @@ export default function RegistroVentas({
 
         const prod = item.producto
         if (prod.m2_caja > 0) {
-          if (prod.stock < item.cantidad_cajas || prod.piezas_sueltas < item.piezas_sueltas) {
-            alert(`⚠️ Stock insuficiente para ${prod.nombre}. Disponible: ${prod.stock} cjs, ${prod.piezas_sueltas} pzs.\n💡 Puedes activar la casilla 'Compra al Paso' si lo adquirirás de una tienda externa.`);
+          const pzsPorCaja = item.piezas_por_caja || 6
+          const totalPiezasDisp = (prod.stock * pzsPorCaja) + (prod.piezas_sueltas || 0)
+          const totalPiezasReq = (item.cantidad_cajas * pzsPorCaja) + item.piezas_sueltas
+
+          if (totalPiezasDisp < totalPiezasReq) {
+            alert(`⚠️ Stock insuficiente para ${prod.nombre}.\nStock total disponible: ${totalPiezasDisp} pzs (${prod.stock} cjs + ${prod.piezas_sueltas || 0} pzs).\nRequerido: ${totalPiezasReq} pzs (${item.cantidad_cajas} cjs + ${item.piezas_sueltas} pzs).\n💡 Puedes activar la casilla 'Compra al Paso' si lo adquirirás de una tienda externa.`);
             return
           }
         } else {
@@ -717,6 +725,28 @@ export default function RegistroVentas({
               <span>➕</span> Producto Eventual
             </button>
           </div>
+
+          {/* BANNER COTIZACIÓN EN EDICIÓN */}
+          {cotizacionOrigenCod && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg flex justify-between items-center text-xs">
+              <div className="flex items-center gap-2 text-amber-900 font-semibold">
+                <span className="text-base">⚡</span>
+                <div>
+                  <p className="font-bold">Editando Cotización {cotizacionOrigenCod}</p>
+                  <p className="text-[11px] text-amber-700 font-normal">
+                    Puedes agregar/quitar productos o modificar cantidades. Elige a la derecha si deseas registrar la venta o guardar la cotización.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCotizacionOrigenCod(null)}
+                className="text-amber-700 hover:text-amber-900 font-bold underline text-[11px] cursor-pointer"
+              >
+                Desvincular
+              </button>
+            </div>
+          )}
 
           {/* Lista del carrito */}
           {carrito.length === 0 ? (
