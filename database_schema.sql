@@ -647,3 +647,7 @@ BEGIN
     RETURN v_codigo_venta;
 END;
 $$ LANGUAGE plpgsql;
+
+-- 5. MIGRACIÓN: Agregar columna ubicacion_fisica en inventario
+ALTER TABLE inventario ADD COLUMN IF NOT EXISTS ubicacion_fisica VARCHAR(100);
+
