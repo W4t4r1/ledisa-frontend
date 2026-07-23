@@ -8,6 +8,7 @@ import {
   getCompras,
   getDetalleCompra,
   registrarNuevaCompraRPC,
+  regularizarFacturaCompra,
   Proveedor,
   CompraData
 } from '../../lib/compras.service'
@@ -110,3 +111,17 @@ export async function buscarProveedores(query: string) {
     throw new Error(error.message)
   }
 }
+
+/**
+ * Regulariza la factura de una compra provisoria.
+ */
+export async function regularizarFacturaCompraAction(compraId: string, numeroFactura: string) {
+  try {
+    const res = await regularizarFacturaCompra(compraId, numeroFactura)
+    revalidatePath('/admin/compras')
+    return res
+  } catch (error: any) {
+    throw new Error(error.message)
+  }
+}
+

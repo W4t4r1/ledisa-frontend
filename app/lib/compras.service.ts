@@ -27,6 +27,7 @@ export interface CompraData {
   total: number
   metodo_pago: 'Efectivo' | 'Yape/Plin' | 'Transferencia BCP' | 'Transferencia Interbancaria' | 'Tarjeta Credito/Debito' | 'Credito' | 'Sin Especificar'
   nota?: string
+  estado_factura?: 'PENDIENTE' | 'FACTURADO'
   items: ItemCompra[]
 }
 
@@ -188,7 +189,8 @@ export async function registrarNuevaCompraRPC(compra: CompraData): Promise<strin
     p_total: compra.total,
     p_metodo_pago: compra.metodo_pago,
     p_nota: compra.nota || null,
-    p_items: compra.items
+    p_items: compra.items,
+    p_estado_factura: compra.estado_factura || 'FACTURADO'
   })
 
   if (error) {
@@ -196,4 +198,23 @@ export async function registrarNuevaCompraRPC(compra: CompraData): Promise<strin
   }
 
   return data as string
+}
+
+/**
+ * Regulariza una compra provisoria actualizando su número de factura definitivo y cambiando el estado a FACTURADO.
+ */
+export async function regularizarFacturaCompra(compraId: string, numeroFactura: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('compras')
+    .update({
+      numero_factura: numeroFactura.trim(),
+      estado_factura: 'FACTURADO'
+    })
+    .eq('id', compraId)
+
+  if (error) {
+    throw new Error(`Error al regularizar factura de compra: ${error.message}`)
+  }
+
+  return true
 }

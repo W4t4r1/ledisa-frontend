@@ -2,7 +2,14 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { guardarProveedor, buscarProveedor, crearCompra, obtenerDetalleDeCompra, buscarProveedores, buscarDniRucPeru } from './actions'
+import { 
+  guardarProveedor, 
+  crearCompra, 
+  obtenerDetalleDeCompra, 
+  buscarDniRucPeru, 
+  buscarProveedores,
+  regularizarFacturaCompraAction
+} from './actions'
 import { Proveedor, CompraData, ItemCompra } from '../../lib/compras.service'
 import { obtenerSeccionProducto } from '../../components/CatalogoInteractivo'
 
@@ -86,8 +93,13 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
 
   // Cabecera factura de compra
   const [numeroFactura, setNumeroFactura] = useState('')
+  const [esFacturaPendiente, setEsFacturaPendiente] = useState(false)
   const [metodoPago, setMetodoPago] = useState<any>('Transferencia BCP')
   const [nota, setNota] = useState('')
+
+  // Modal para regularizar factura de compra provisoria
+  const [compraRegularizar, setCompraRegularizar] = useState<any | null>(null)
+  const [numFacturaRegularizar, setNumFacturaRegularizar] = useState('')
 
   // Sugerencias de productos para el carrito de compras
   const productosSugeridos = inventario.filter(p => 
@@ -276,7 +288,7 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
       return
     }
 
-    if (!numeroFactura.trim()) {
+    if (!esFacturaPendiente && !numeroFactura.trim()) {
       alert('Por favor ingresa el número de comprobante/factura del proveedor.')
       return
     }
@@ -288,12 +300,18 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
 
     startTransition(async () => {
       try {
+        const fechaStr = new Date().toISOString().slice(2,10).replace(/-/g, '')
+        const numFacturaFinal = esFacturaPendiente
+          ? (numeroFactura.trim() || `REC-${fechaStr}-${Math.floor(1000 + Math.random() * 9000)}`)
+          : numeroFactura.trim()
+
         const payload: CompraData = {
           proveedor_id: proveedorSeleccionado.id || null,
-          numero_factura: numeroFactura.trim(),
+          numero_factura: numFacturaFinal,
           total: totalCompra,
           metodo_pago: metodoPago,
           nota: nota.trim() || undefined,
+          estado_factura: esFacturaPendiente ? 'PENDIENTE' : 'FACTURADO',
           items: carrito.map(item => ({
             producto_id: item.producto.id,
             cantidad_cajas: item.cantidad_cajas,
@@ -307,13 +325,17 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
         }
 
         const codigoGenerado = await crearCompra(payload)
-        alert(`✅ Compra registrada con éxito. Código de Operación: ${codigoGenerado}\nSe incrementó el stock en almacén y se actualizaron los costos.`)
+        const msjEstado = esFacturaPendiente 
+          ? '🟡 Compra provisoria registrada sin factura (Estado: Pendiente de Factura).\nEl stock ya ingresó al inventario para venderse.'
+          : '🟢 Compra registrada formalmente.'
+        alert(`✅ ${msjEstado}\nCódigo de Operación: ${codigoGenerado}`)
         
         // Limpiar formulario
         setCarrito([])
         setProveedorSeleccionado(null)
         setDocumentoBusqueda('')
         setNumeroFactura('')
+        setEsFacturaPendiente(false)
         setNota('')
       } catch (err: any) {
         alert('❌ Error al registrar la compra: ' + err.message)
@@ -741,13 +763,40 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                     🧾 Detalles del Comprobante
                   </h3>
 
+                  {/* Opción Factura Pendiente */}
+                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg space-y-2">
+                    <label className="flex items-center gap-2 font-bold text-amber-900 cursor-pointer select-none text-xs">
+                      <input 
+                        type="checkbox"
+                        checked={esFacturaPendiente}
+                        onChange={e => {
+                          setEsFacturaPendiente(e.target.checked)
+                          if (e.target.checked && !numeroFactura) {
+                            const fechaStr = new Date().toISOString().slice(2,10).replace(/-/g, '')
+                            setNumeroFactura(`REC-${fechaStr}-${Math.floor(1000 + Math.random() * 9000)}`)
+                          }
+                        }}
+                        className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500"
+                      />
+                      <span>🟡 Factura Pendiente (Ingreso Provisorio sin Factura)</span>
+                    </label>
+
+                    {esFacturaPendiente && (
+                      <p className="text-[10px] text-amber-700 font-medium leading-relaxed">
+                        ⚡ El stock ingresará <strong>inmediatamente</strong> al almacén para que puedas venderlo. Cuando te entreguen la factura, podrás regularizarla en el Historial de Compras.
+                      </p>
+                    )}
+                  </div>
+
                   {/* Número de factura */}
                   <div>
-                    <label className="text-xs font-bold text-gray-500 block mb-1">Nro. de Factura / Boleta Proveedor*</label>
+                    <label className="text-xs font-bold text-gray-500 block mb-1">
+                      {esFacturaPendiente ? 'Nro. de Guía de Recepción / Control Interno' : 'Nro. de Factura / Boleta Proveedor*'}
+                    </label>
                     <input 
                       type="text" 
-                      required
-                      placeholder="Ej: F001-0001234"
+                      required={!esFacturaPendiente}
+                      placeholder={esFacturaPendiente ? 'Ej: REC-260723-1234 o N° Guía' : 'Ej: F001-0001234'}
                       value={numeroFactura}
                       onChange={e => setNumeroFactura(e.target.value)}
                       className="w-full border p-2.5 rounded-lg text-gray-900 bg-white focus:outline-none focus:border-[#04558C] font-semibold"
@@ -854,7 +903,20 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                             hour: '2-digit', minute: '2-digit'
                           })}
                         </td>
-                        <td className="p-3 font-semibold text-gray-700">{c.numero_factura}</td>
+                        <td className="p-3">
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-gray-800">{c.numero_factura}</span>
+                            {c.estado_factura === 'PENDIENTE' ? (
+                              <span className="text-[9px] bg-amber-100 text-amber-800 font-extrabold px-1.5 py-0.5 rounded border border-amber-300 w-max mt-0.5">
+                                🟡 PENDIENTE DE FACTURA
+                              </span>
+                            ) : (
+                              <span className="text-[9px] bg-green-100 text-green-800 font-extrabold px-1.5 py-0.5 rounded border border-green-300 w-max mt-0.5">
+                                🟢 FACTURADO
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-3 text-gray-800 font-medium">
                           {c.proveedores ? c.proveedores.razon_social : 'Sin Proveedor'}
                           {c.proveedores && <span className="block text-xs text-gray-400 font-mono">{c.proveedores.documento}</span>}
@@ -862,12 +924,26 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
                         <td className="p-3 text-gray-600 font-medium">{c.metodo_pago}</td>
                         <td className="p-3 text-right font-bold text-[#04558C]">S/. {Number(c.total).toFixed(2)}</td>
                         <td className="p-3 text-center">
-                          <button 
-                            onClick={() => handleVerDetallesCompra(c)}
-                            className="text-[#04558C] hover:text-[#033f6b] font-bold text-xs bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                          >
-                            Ver Detalle
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button 
+                              onClick={() => handleVerDetallesCompra(c)}
+                              className="text-[#04558C] hover:text-[#033f6b] font-bold text-xs bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                            >
+                              Ver Detalle
+                            </button>
+                            {c.estado_factura === 'PENDIENTE' && (
+                              <button
+                                onClick={() => {
+                                  setCompraRegularizar(c)
+                                  setNumFacturaRegularizar('')
+                                }}
+                                className="text-amber-800 hover:text-amber-950 font-bold text-xs bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                title="Adjuntar número de factura formal"
+                              >
+                                📄 Regularizar Factura
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1210,6 +1286,80 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
         </div>
       )}
 
+      {/* --- MODAL REGULARIZAR FACTURA DE COMPRA --- */}
+      {compraRegularizar && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="text-lg font-bold text-amber-900 flex items-center gap-2">
+                <span>📄</span> Regularizar Factura de Compra
+              </h3>
+              <button 
+                onClick={() => setCompraRegularizar(null)}
+                className="text-gray-400 hover:text-gray-600 font-bold text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs text-amber-900 space-y-1">
+              <p className="font-bold">Operación: {compraRegularizar.codigo_compra}</p>
+              <p>Proveedor: {compraRegularizar.proveedores?.razon_social || 'Desconocido'}</p>
+              <p>Código Provisorio: {compraRegularizar.numero_factura}</p>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (!numFacturaRegularizar.trim()) {
+                  alert('Por favor ingresa el número de factura definitivo.')
+                  return
+                }
+
+                startTransition(async () => {
+                  try {
+                    await regularizarFacturaCompraAction(compraRegularizar.id, numFacturaRegularizar.trim())
+                    setCompraRegularizar(null)
+                    alert('✅ Factura regularizada con éxito. El registro pasó al estado FACTURADO.')
+                  } catch (err: any) {
+                    alert('❌ Error al regularizar factura: ' + err.message)
+                  }
+                })
+              }}
+              className="space-y-4 text-xs text-gray-900"
+            >
+              <div>
+                <label className="font-bold text-gray-700 block mb-1">Número de Factura Definitivo*</label>
+                <input 
+                  type="text"
+                  required
+                  placeholder="Ej: F001-004523"
+                  value={numFacturaRegularizar}
+                  onChange={e => setNumFacturaRegularizar(e.target.value)}
+                  className="w-full border border-gray-300 p-2.5 rounded-lg text-gray-900 bg-white font-bold text-sm focus:outline-none focus:border-amber-600"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setCompraRegularizar(null)}
+                  className="px-4 py-2 border rounded-lg text-gray-600 font-bold hover:bg-gray-50 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPending}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow-md transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isPending ? '⏳ Guardando...' : '💾 Guardar Factura'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

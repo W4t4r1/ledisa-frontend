@@ -378,7 +378,8 @@ CREATE OR REPLACE FUNCTION registrar_compra(
     p_total NUMERIC,
     p_metodo_pago VARCHAR,
     p_nota TEXT,
-    p_items JSONB -- Formato: [{"producto_id": "P01", "cantidad_cajas": 10, "piezas_sueltas": 0, "costo_unitario": 28.5, "subtotal": 285.0}]
+    p_items JSONB, -- Formato: [{"producto_id": "P01", "cantidad_cajas": 10, "piezas_sueltas": 0, "costo_unitario": 28.5, "subtotal": 285.0}]
+    p_estado_factura VARCHAR DEFAULT 'FACTURADO'
 ) RETURNS VARCHAR AS $$
 DECLARE
     v_compra_id UUID;
@@ -392,13 +393,15 @@ DECLARE
     v_stock_actual INT;
     v_pzs_actual INT;
     v_m2_caja NUMERIC;
+    v_estado_fac VARCHAR(20);
 BEGIN
+    v_estado_fac := COALESCE(p_estado_factura, 'FACTURADO');
     -- Generar código correlativo de compra
     v_codigo_compra := 'COM-' || TO_CHAR(NOW(), 'YYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 10000)::TEXT, 4, '0');
 
     -- Insertar en cabecera de compras
-    INSERT INTO compras (codigo_compra, proveedor_id, numero_factura, total, metodo_pago, nota)
-    VALUES (v_codigo_compra, p_proveedor_id, p_numero_factura, p_total, p_metodo_pago, p_nota)
+    INSERT INTO compras (codigo_compra, proveedor_id, numero_factura, total, metodo_pago, nota, estado_factura)
+    VALUES (v_codigo_compra, p_proveedor_id, p_numero_factura, p_total, p_metodo_pago, p_nota, v_estado_fac)
     RETURNING id INTO v_compra_id;
 
     -- Iterar sobre los productos comprados
@@ -650,4 +653,7 @@ $$ LANGUAGE plpgsql;
 
 -- 5. MIGRACIÓN: Agregar columna ubicacion_fisica en inventario
 ALTER TABLE inventario ADD COLUMN IF NOT EXISTS ubicacion_fisica VARCHAR(100);
+
+-- 6. MIGRACIÓN: Agregar columna estado_factura en compras
+ALTER TABLE compras ADD COLUMN IF NOT EXISTS estado_factura VARCHAR(20) DEFAULT 'FACTURADO';
 
