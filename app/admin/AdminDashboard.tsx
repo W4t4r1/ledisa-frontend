@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { eliminarProducto, guardarProducto, toggleVisibilidadProducto } from './actions'
+import { eliminarProducto, guardarProducto, toggleVisibilidadProducto, actualizarProductosMasivo } from './actions'
 import { obtenerSeccionProducto } from '../components/CatalogoInteractivo'
 
 export default function AdminDashboard({ inventarioInicial }: { inventarioInicial: any[] }) {
@@ -19,11 +19,41 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
     ubicacion_fisica: '', oculto: false
   })
 
+  // Estado para Edición Masiva (Por Lote)
+  const [idsSeleccionados, setIdsSeleccionados] = useState<string[]>([])
+  const [mostrarModalMasivo, setMostrarModalMasivo] = useState(false)
+  const [formMasivo, setFormMasivo] = useState({
+    actCosto: false, costo: 0,
+    actUbicacion: false, ubicacion_fisica: '',
+    actPrecio: false, precio: 0,
+    actStockMinimo: false, stock_minimo: 0,
+    actMarca: false, marca: '',
+    actVisibilidad: false, oculto: false
+  })
+
   // Filtro rápido en memoria
   const productosFiltrados = inventarioInicial.filter(item => 
     item.nombre.toLowerCase().includes(busqueda.toLowerCase()) || 
     item.id.toLowerCase().includes(busqueda.toLowerCase())
   )
+
+  const todosSeleccionados = productosFiltrados.length > 0 && productosFiltrados.every(p => idsSeleccionados.includes(p.id))
+
+  const handleToggleSeleccionarTodos = () => {
+    if (todosSeleccionados) {
+      setIdsSeleccionados([])
+    } else {
+      setIdsSeleccionados(productosFiltrados.map(p => p.id))
+    }
+  }
+
+  const handleToggleSeleccionarUno = (id: string) => {
+    if (idsSeleccionados.includes(id)) {
+      setIdsSeleccionados(idsSeleccionados.filter(item => item !== id))
+    } else {
+      setIdsSeleccionados([...idsSeleccionados, id])
+    }
+  }
 
   // Disparadores de acciones
   const handleEliminar = (id: string, nombre: string) => {
@@ -81,6 +111,46 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
     })
   }
 
+  const handleGuardarMasivo = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (idsSeleccionados.length === 0) {
+      alert('Debes seleccionar al menos un producto.')
+      return
+    }
+
+    const cambios: Record<string, any> = {}
+    if (formMasivo.actCosto) cambios.costo = parseFloat(formMasivo.costo as any) || 0
+    if (formMasivo.actUbicacion) cambios.ubicacion_fisica = formMasivo.ubicacion_fisica.trim() || null
+    if (formMasivo.actPrecio) cambios.precio = parseFloat(formMasivo.precio as any) || 0
+    if (formMasivo.actStockMinimo) cambios.stock_minimo = parseInt(formMasivo.stock_minimo as any) || 0
+    if (formMasivo.actMarca) cambios.marca = formMasivo.marca.trim() || 'OTRO'
+    if (formMasivo.actVisibilidad) cambios.oculto = formMasivo.oculto
+
+    if (Object.keys(cambios).length === 0) {
+      alert('Por favor activa al menos una casilla para modificar los campos deseados.')
+      return
+    }
+
+    startTransition(async () => {
+      try {
+        await actualizarProductosMasivo(idsSeleccionados, cambios)
+        setMostrarModalMasivo(false)
+        setIdsSeleccionados([])
+        setFormMasivo({
+          actCosto: false, costo: 0,
+          actUbicacion: false, ubicacion_fisica: '',
+          actPrecio: false, precio: 0,
+          actStockMinimo: false, stock_minimo: 0,
+          actMarca: false, marca: '',
+          actVisibilidad: false, oculto: false
+        })
+        alert(`✅ Se actualizaron masivamente ${idsSeleccionados.length} productos con éxito.`)
+      } catch (err: any) {
+        alert('❌ Error en la edición masiva: ' + err.message)
+      }
+    })
+  }
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 relative">
       <div className="flex justify-between items-center mb-6">
@@ -94,18 +164,48 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
         </button>
       </div>
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
         <input 
           type="text" placeholder="🔎 Buscar por nombre o código..." 
           className="w-full md:w-1/3 border border-gray-300 p-2 rounded-md focus:outline-none focus:border-[#04558C] text-gray-900"
           value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
         />
+
+        {/* BARRA FLOTANTE DE EDICIÓN MASIVA */}
+        {idsSeleccionados.length > 0 && (
+          <div className="bg-indigo-50 border border-indigo-200 p-2 px-4 rounded-lg flex items-center gap-4 text-xs w-full md:w-auto shadow-sm">
+            <span className="font-extrabold text-indigo-900">
+              {idsSeleccionados.length} producto{idsSeleccionados.length > 1 ? 's' : ''} seleccionado{idsSeleccionados.length > 1 ? 's' : ''}
+            </span>
+            <button
+              onClick={() => setMostrarModalMasivo(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1.5 rounded transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+            >
+              <span>✏️</span> Edición Masiva
+            </button>
+            <button
+              onClick={() => setIdsSeleccionados([])}
+              className="text-gray-500 hover:text-gray-700 font-bold underline"
+            >
+              Desmarcar
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-gray-100 text-gray-600 text-sm uppercase tracking-wider border-b border-gray-200">
+              <th className="p-3 text-center w-10">
+                <input 
+                  type="checkbox"
+                  checked={todosSeleccionados}
+                  onChange={handleToggleSeleccionarTodos}
+                  className="w-4 h-4 text-[#04558C] rounded focus:ring-[#04558C] cursor-pointer"
+                  title="Seleccionar o deseleccionar todos los visibles"
+                />
+              </th>
               <th className="p-3">ID</th>
               <th className="p-3">Producto</th>
               <th className="p-3 text-right">Costo</th>
@@ -117,7 +217,15 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
           </thead>
           <tbody className="divide-y divide-gray-200">
             {productosFiltrados.map((item) => (
-              <tr key={item.id} className={`hover:bg-gray-50 transition-colors ${item.oculto ? 'opacity-60 bg-gray-50/50' : ''}`}>
+              <tr key={item.id} className={`hover:bg-gray-50 transition-colors ${idsSeleccionados.includes(item.id) ? 'bg-indigo-50/40' : item.oculto ? 'opacity-60 bg-gray-50/50' : ''}`}>
+                <td className="p-3 text-center">
+                  <input 
+                    type="checkbox"
+                    checked={idsSeleccionados.includes(item.id)}
+                    onChange={() => handleToggleSeleccionarUno(item.id)}
+                    className="w-4 h-4 text-[#04558C] rounded focus:ring-[#04558C] cursor-pointer"
+                  />
+                </td>
                 <td className="p-3 text-sm font-mono text-gray-500">{item.id}</td>
                 <td className="p-3">
                   <div className="flex flex-col">
@@ -348,6 +456,196 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                 <button type="button" onClick={() => setMostrarModal(false)} className="px-4 py-2 border rounded text-gray-600 font-bold hover:bg-gray-50">Cancelar</button>
                 <button type="submit" disabled={isPending} className="px-4 py-2 bg-[#04558C] text-white rounded font-bold hover:bg-[#033f6b] disabled:opacity-50">
                   {isPending ? 'Guardando...' : '💾 Guardar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* --- MODAL EDICIÓN MASIVA (POR LOTE) --- */}
+      {mostrarModalMasivo && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-2xl space-y-4 text-xs text-gray-900">
+            <div className="flex justify-between items-center border-b pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+                  <span>✏️</span> Edición Masiva de Productos
+                </h3>
+                <p className="text-[11px] text-gray-500 font-medium">
+                  Se actualizarán <strong className="text-indigo-700">{idsSeleccionados.length} productos</strong> seleccionados.
+                </p>
+              </div>
+              <button 
+                onClick={() => setMostrarModalMasivo(false)}
+                className="text-gray-400 hover:text-gray-600 font-bold text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleGuardarMasivo} className="space-y-4">
+              <p className="text-gray-500 italic">
+                Marca únicamente las casillas de los atributos que deseas actualizar en lote:
+              </p>
+
+              {/* 1. Costo */}
+              <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                <label className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    checked={formMasivo.actCosto}
+                    onChange={e => setFormMasivo({...formMasivo, actCosto: e.target.checked})}
+                    className="w-4 h-4 text-indigo-600 rounded"
+                  />
+                  <span>Modificar Costo de Adquisición (S/.)</span>
+                </label>
+                {formMasivo.actCosto && (
+                  <input 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Ej: 2.50"
+                    value={formMasivo.costo}
+                    onChange={e => setFormMasivo({...formMasivo, costo: parseFloat(e.target.value) || 0})}
+                    className="w-full border p-2 rounded-lg bg-white font-bold text-gray-900"
+                  />
+                )}
+              </div>
+
+              {/* 2. Ubicación Física */}
+              <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                <label className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    checked={formMasivo.actUbicacion}
+                    onChange={e => setFormMasivo({...formMasivo, actUbicacion: e.target.checked})}
+                    className="w-4 h-4 text-indigo-600 rounded"
+                  />
+                  <span>📍 Modificar Ubicación Física Interna</span>
+                </label>
+                {formMasivo.actUbicacion && (
+                  <select 
+                    value={formMasivo.ubicacion_fisica}
+                    onChange={e => setFormMasivo({...formMasivo, ubicacion_fisica: e.target.value})}
+                    className="w-full border p-2 rounded-lg bg-white font-semibold text-gray-900"
+                  >
+                    <option value="">-- Sin especificar --</option>
+                    <option value="Cuarto 1">Cuarto 1</option>
+                    <option value="Cuarto 2">Cuarto 2</option>
+                    <option value="Almacén Fondo">Almacén Fondo</option>
+                    <option value="2do Piso">2do Piso</option>
+                    <option value="Exhibición">Exhibición</option>
+                  </select>
+                )}
+              </div>
+
+              {/* 3. Precio de Venta */}
+              <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                <label className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    checked={formMasivo.actPrecio}
+                    onChange={e => setFormMasivo({...formMasivo, actPrecio: e.target.checked})}
+                    className="w-4 h-4 text-indigo-600 rounded"
+                  />
+                  <span>Modificar Precio de Venta Público (S/.)</span>
+                </label>
+                {formMasivo.actPrecio && (
+                  <input 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Ej: 35.90"
+                    value={formMasivo.precio}
+                    onChange={e => setFormMasivo({...formMasivo, precio: parseFloat(e.target.value) || 0})}
+                    className="w-full border p-2 rounded-lg bg-white font-bold text-gray-900"
+                  />
+                )}
+              </div>
+
+              {/* 4. Stock Mínimo */}
+              <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                <label className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    checked={formMasivo.actStockMinimo}
+                    onChange={e => setFormMasivo({...formMasivo, actStockMinimo: e.target.checked})}
+                    className="w-4 h-4 text-indigo-600 rounded"
+                  />
+                  <span>Modificar Alerta de Stock Mínimo</span>
+                </label>
+                {formMasivo.actStockMinimo && (
+                  <input 
+                    type="number"
+                    min="0"
+                    placeholder="Ej: 10"
+                    value={formMasivo.stock_minimo}
+                    onChange={e => setFormMasivo({...formMasivo, stock_minimo: parseInt(e.target.value) || 0})}
+                    className="w-full border p-2 rounded-lg bg-white font-bold text-gray-900"
+                  />
+                )}
+              </div>
+
+              {/* 5. Marca */}
+              <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                <label className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    checked={formMasivo.actMarca}
+                    onChange={e => setFormMasivo({...formMasivo, actMarca: e.target.checked})}
+                    className="w-4 h-4 text-indigo-600 rounded"
+                  />
+                  <span>Modificar Marca</span>
+                </label>
+                {formMasivo.actMarca && (
+                  <input 
+                    type="text"
+                    placeholder="Ej: Celima, Trebol, San Lorenzo"
+                    value={formMasivo.marca}
+                    onChange={e => setFormMasivo({...formMasivo, marca: e.target.value})}
+                    className="w-full border p-2 rounded-lg bg-white font-bold text-gray-900"
+                  />
+                )}
+              </div>
+
+              {/* 6. Visibilidad */}
+              <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                <label className="flex items-center gap-2 font-bold text-gray-800 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    checked={formMasivo.actVisibilidad}
+                    onChange={e => setFormMasivo({...formMasivo, actVisibilidad: e.target.checked})}
+                    className="w-4 h-4 text-indigo-600 rounded"
+                  />
+                  <span>Modificar Visibilidad en Catálogo (Ocultar/Mostrar)</span>
+                </label>
+                {formMasivo.actVisibilidad && (
+                  <select
+                    value={formMasivo.oculto ? 'oculto' : 'visible'}
+                    onChange={e => setFormMasivo({...formMasivo, oculto: e.target.value === 'oculto'})}
+                    className="w-full border p-2 rounded-lg bg-white font-bold text-gray-900"
+                  >
+                    <option value="visible">👁️ Visible en Catálogo</option>
+                    <option value="oculto">🙈 Oculto en Catálogo</option>
+                  </select>
+                )}
+              </div>
+
+              {/* Acciones */}
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalMasivo(false)}
+                  className="px-4 py-2 border rounded-lg text-gray-600 font-bold hover:bg-gray-50 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPending}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-md transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isPending ? '⏳ Actualizando...' : `💾 Aplicar a los ${idsSeleccionados.length} Productos`}
                 </button>
               </div>
             </form>

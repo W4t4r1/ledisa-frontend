@@ -62,3 +62,23 @@ export async function toggleVisibilidadProducto(id: string, oculto: boolean) {
 
   revalidatePath('/admin')
 }
+
+// ACCIÓN 4: EDICIÓN MASIVA DE PRODUCTOS (POR LOTE)
+export async function actualizarProductosMasivo(ids: string[], cambios: Record<string, any>) {
+  if (!ids || ids.length === 0) {
+    throw new Error('Debes seleccionar al menos un producto.')
+  }
+
+  const { error } = await supabase
+    .from('inventario')
+    .update(cambios)
+    .in('id', ids)
+
+  if (error) {
+    throw new Error(`Error en la edición masiva: ${error.message}`)
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/admin/dashboard')
+  revalidatePath('/admin/ventas')
+}
