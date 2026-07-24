@@ -46,12 +46,16 @@ export async function guardarCliente(cliente: Cliente) {
 export async function crearNuevaVenta(venta: VentaData) {
   try {
     const codigoVenta = await registrarNuevaVenta(venta)
-    revalidatePath('/admin')
-    revalidatePath('/admin/dashboard')
-    revalidatePath('/admin/ventas')
-    return codigoVenta
+    try {
+      revalidatePath('/admin')
+      revalidatePath('/admin/dashboard')
+      revalidatePath('/admin/ventas')
+    } catch (e) {
+      console.warn('Revalidation warning:', e)
+    }
+    return { success: true, data: codigoVenta }
   } catch (error: any) {
-    throw new Error(error.message)
+    return { success: false, error: error.message || 'Error al procesar la venta' }
   }
 }
 

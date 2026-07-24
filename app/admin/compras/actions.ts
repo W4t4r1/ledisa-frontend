@@ -53,15 +53,18 @@ export async function crearCompra(compra: CompraData) {
   try {
     const result = await registrarNuevaCompraRPC(compra)
     
-    // Forzamos actualizaciones de caché generales
-    revalidatePath('/admin')
-    revalidatePath('/admin/dashboard')
-    revalidatePath('/admin/kardex')
-    revalidatePath('/admin/compras')
+    try {
+      revalidatePath('/admin')
+      revalidatePath('/admin/dashboard')
+      revalidatePath('/admin/kardex')
+      revalidatePath('/admin/compras')
+    } catch (e) {
+      console.warn('Revalidation warning:', e)
+    }
     
-    return result
+    return { success: true, data: result }
   } catch (error: any) {
-    throw new Error(error.message)
+    return { success: false, error: error.message || 'Error al registrar la compra' }
   }
 }
 

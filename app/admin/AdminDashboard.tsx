@@ -102,7 +102,10 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
     e.preventDefault()
     startTransition(async () => {
       try {
-        await guardarProducto(form, esEdicion)
+        const resProd = await guardarProducto(form, esEdicion)
+        if (!resProd.success) {
+          throw new Error(resProd.error || 'Error al guardar el producto')
+        }
         setMostrarModal(false)
         alert('✅ Producto guardado exitosamente.')
       } catch (error: any) {

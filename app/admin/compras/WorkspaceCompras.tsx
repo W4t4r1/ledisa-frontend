@@ -324,7 +324,11 @@ export default function WorkspaceCompras({ inventario, proveedoresIniciales, com
           }))
         }
 
-        const codigoGenerado = await crearCompra(payload)
+        const resCompra = await crearCompra(payload)
+        if (!resCompra.success) {
+          throw new Error(resCompra.error || 'Error al registrar la compra')
+        }
+        const codigoGenerado = resCompra.data!
         const msjEstado = esFacturaPendiente 
           ? '🟡 Compra provisoria registrada sin factura (Estado: Pendiente de Factura).\nEl stock ya ingresó al inventario para venderse.'
           : '🟢 Compra registrada formalmente.'

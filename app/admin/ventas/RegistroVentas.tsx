@@ -1,5 +1,7 @@
 import { useState, useTransition, useEffect } from 'react'
 import { buscarCliente, guardarCliente, crearNuevaVenta, buscarClientes, buscarDniRucPeru } from './actions'
+import { guardarProducto } from '../actions'
+import { crearCompra } from '../compras/actions'
 import ComprobantePrint from '../../components/ComprobantePrint'
 import type { CompraData } from '../../lib/compras.service'
 
@@ -568,9 +570,8 @@ export default function RegistroVentas({
         // 0. Dar de alta automáticamente los productos eventuales en el catálogo de inventario
         const itemsEventuales = carrito.filter(i => i.es_producto_eventual)
         if (itemsEventuales.length > 0) {
-          const { guardarProducto } = await import('../actions')
           for (const itemEv of itemsEventuales) {
-            await guardarProducto({
+            const resEv = await guardarProducto({
               id: itemEv.producto.id,
               nombre: itemEv.producto.nombre,
               categoria: itemEv.producto.categoria,
@@ -585,13 +586,15 @@ export default function RegistroVentas({
               imagen: null,
               oculto: true
             }, false)
+            if (!resEv.success) {
+              throw new Error(resEv.error || 'Error al guardar el producto eventual')
+            }
           }
         }
 
         // 1. Procesar Compras al Paso primero (si las hay y no es una simple cotización)
         const itemsAlPaso = carrito.filter(i => i.es_compra_al_paso)
         if (itemsAlPaso.length > 0 && estadoVenta !== 'COTIZACION') {
-          const { crearCompra } = await import('../compras/actions')
           const payloadCompra: CompraData = {
             proveedor_id: null,
             numero_factura: itemsAlPaso[0].comprobante_proveedor || `COMPRA-PASO-${Date.now().toString().slice(-6)}`,
@@ -620,7 +623,10 @@ export default function RegistroVentas({
             }))
           }
 
-          await crearCompra(payloadCompra)
+          const resCompra = await crearCompra(payloadCompra)
+          if (!resCompra.success) {
+            throw new Error(resCompra.error || 'Error al procesar la compra al paso')
+          }
         }
 
         // 2. Procesar la Venta asignando los costos reales de adquisición
@@ -646,7 +652,11 @@ export default function RegistroVentas({
           }))
         }
 
-        const codigoGenerado = await crearNuevaVenta(payload)
+        const resVenta = await crearNuevaVenta(payload)
+        if (!resVenta.success) {
+          throw new Error(resVenta.error || 'Error al procesar la venta')
+        }
+        const codigoGenerado = resVenta.data!
         
         const payloadExito = {
           codigo_venta: codigoGenerado,

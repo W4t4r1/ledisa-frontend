@@ -17,36 +17,46 @@ export async function eliminarProducto(id: string) {
 
 // ACCIÓN 2: GUARDAR (Crea si es nuevo, Actualiza si ya existe)
 export async function guardarProducto(productoBase: any, esEdicion: boolean) {
-  // Autogeneramos nombre si está vacío y completamos la marca como 'OTRO' si no se especifica
-  const nombreAutogenerado = (productoBase.nombre || '').trim() || `${productoBase.categoria || 'Producto'} ${productoBase.id}`;
-  const marcaAutogenerada = (productoBase.marca || '').trim() || 'OTRO';
+  try {
+    // Autogeneramos nombre si está vacío y completamos la marca como 'OTRO' si no se especifica
+    const nombreAutogenerado = (productoBase.nombre || '').trim() || `${productoBase.categoria || 'Producto'} ${productoBase.id}`;
+    const marcaAutogenerada = (productoBase.marca || '').trim() || 'OTRO';
 
-  // Limpiamos los datos antes de inyectarlos
-  const producto = {
-    ...productoBase,
-    nombre: nombreAutogenerado,
-    marca: marcaAutogenerada,
-    precio: parseFloat(productoBase.precio),
-    costo: parseFloat(productoBase.costo || 0),
-    stock: parseInt(productoBase.stock),
-    stock_minimo: parseInt(productoBase.stock_minimo || 0),
-    m2_caja: parseFloat(productoBase.m2_caja || 0),
-    piezas_sueltas: parseInt(productoBase.piezas_sueltas || 0),
-    color: productoBase.color?.trim() || null,
-    imagen: productoBase.imagen?.trim() || null,
-    ubicacion_fisica: productoBase.ubicacion_fisica?.trim() || null,
-    oculto: !!productoBase.oculto
+    // Limpiamos los datos antes de inyectarlos
+    const producto = {
+      ...productoBase,
+      nombre: nombreAutogenerado,
+      marca: marcaAutogenerada,
+      precio: parseFloat(productoBase.precio),
+      costo: parseFloat(productoBase.costo || 0),
+      stock: parseInt(productoBase.stock),
+      stock_minimo: parseInt(productoBase.stock_minimo || 0),
+      m2_caja: parseFloat(productoBase.m2_caja || 0),
+      piezas_sueltas: parseInt(productoBase.piezas_sueltas || 0),
+      color: productoBase.color?.trim() || null,
+      imagen: productoBase.imagen?.trim() || null,
+      ubicacion_fisica: productoBase.ubicacion_fisica?.trim() || null,
+      oculto: !!productoBase.oculto
+    }
+
+    if (esEdicion) {
+      const { error } = await supabase.from('inventario').update(producto).eq('id', producto.id)
+      if (error) return { success: false, error: error.message }
+    } else {
+      const { error } = await supabase.from('inventario').insert(producto)
+      if (error) return { success: false, error: error.message }
+    }
+
+    try {
+      revalidatePath('/admin')
+    } catch (e) {
+      console.warn('Revalidation warning:', e)
+    }
+
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Error al guardar el producto' }
   }
-
-  if (esEdicion) {
-    const { error } = await supabase.from('inventario').update(producto).eq('id', producto.id)
-    if (error) throw new Error(error.message)
-  } else {
-    const { error } = await supabase.from('inventario').insert(producto)
-    if (error) throw new Error(error.message)
-  }
-
-  revalidatePath('/admin')
 }
 
 // ACCIÓN 3: CAMBIAR VISIBILIDAD (OCULTAR / MOSTRAR)
