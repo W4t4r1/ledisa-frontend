@@ -16,6 +16,8 @@ interface Producto {
   m2_caja: number
   piezas_sueltas: number
   color?: string
+  es_combo?: boolean
+  producto_componentes?: { componente_id: string; cantidad: number }[]
 }
 
 interface CartItem {
@@ -262,6 +264,19 @@ export default function RegistroVentas({
       return
     }
 
+    const esCombo = !!producto.es_combo || (producto.producto_componentes && producto.producto_componentes.length > 0)
+
+    if (esCombo && producto.producto_componentes) {
+      for (const c of producto.producto_componentes) {
+        const compProd = productos.find(p => p.id === c.componente_id)
+        if (!compProd || compProd.stock < c.cantidad) {
+          if (!window.confirm(`⚠️ Advertencia: El componente "${compProd?.nombre || c.componente_id}" del combo no tiene stock suficiente (Stock: ${compProd?.stock || 0}, Requerido: ${c.cantidad}). ¿Deseas agregarlo de todos modos?`)) {
+            return
+          }
+        }
+      }
+    }
+
     const nuevoItem: CartItem = {
       producto,
       cantidad_cajas: producto.m2_caja > 0 ? 1 : 0,
@@ -277,6 +292,7 @@ export default function RegistroVentas({
     setBusquedaProd('')
     setMostrarSugerenciasProd(false)
   }
+
 
   // Agregar Producto Eventual al carrito
   const handleAgregarProductoEventual = (e: React.FormEvent) => {
@@ -839,26 +855,39 @@ export default function RegistroVentas({
                       </button>
                     </div>
                   ) : (
-                    productosSugeridos.map(p => (
-                      <div 
-                        key={p.id}
-                        onClick={() => agregarAlCarrito(p)}
-                        className="p-3 hover:bg-gray-50 cursor-pointer flex justify-between items-center transition-colors"
-                      >
-                        <div>
-                          <p className="text-sm font-bold text-gray-800">{p.nombre}</p>
-                          <p className="text-xs text-gray-500 font-mono">Cód: {p.id} | Marca: {p.marca}</p>
+                    productosSugeridos.map(p => {
+                      const esCombo = !!p.es_combo || (p.producto_componentes && p.producto_componentes.length > 0)
+                      return (
+                        <div 
+                          key={p.id}
+                          onClick={() => agregarAlCarrito(p)}
+                          className="p-3 hover:bg-gray-50 cursor-pointer flex justify-between items-center transition-colors border-b border-gray-100 last:border-b-0"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-bold text-gray-800">{p.nombre}</p>
+                              {esCombo && (
+                                <span className="text-[10px] bg-indigo-600 text-white font-bold px-1.5 py-0.5 rounded shadow-xs">
+                                  📦 COMBO ({p.producto_componentes?.length || 0} ítems)
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 font-mono">Cód: {p.id} | Marca: {p.marca}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-[#04558C]">S/. {p.precio}</p>
+                            <p className="text-[10px] text-gray-400">
+                              {esCombo
+                                ? `📦 Combo por componentes`
+                                : p.m2_caja > 0 
+                                  ? `Stock: ${p.stock} cjs / ${p.piezas_sueltas} pzs` 
+                                  : `Stock: ${p.stock} und`}
+                            </p>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-[#04558C]">S/. {p.precio}</p>
-                          <p className="text-[10px] text-gray-400">
-                            {p.m2_caja > 0 
-                              ? `Stock: ${p.stock} cjs / ${p.piezas_sueltas} pzs` 
-                              : `Stock: ${p.stock} und`}
-                          </p>
-                        </div>
-                      </div>
-                    ))
+                      )
+                    })
+
                   )}
                 </div>
               )}
@@ -938,9 +967,39 @@ export default function RegistroVentas({
                       {/* Columna Producto */}
                       <div className="col-span-4">
                         <div className="flex flex-col">
-                          <span className="font-bold text-gray-800 text-sm">{p.nombre}</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-gray-800 text-sm">{p.nombre}</span>
+                            {(p.es_combo || (p.producto_componentes && p.producto_componentes.length > 0)) && (
+                              <span className="text-[10px] bg-indigo-600 text-white font-bold px-1.5 py-0.5 rounded shadow-xs">
+                                📦 COMBO
+                              </span>
+                            )}
+                          </div>
                           <span className="text-xs text-gray-400 font-mono">Cód: {p.id}</span>
                           
+                          {/* SECCIÓN DETALLE DE COMPONENTES DEL COMBO */}
+                          {(p.es_combo || (p.producto_componentes && p.producto_componentes.length > 0)) && (
+                            <div className="mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg text-xs space-y-1.5">
+                              <span className="font-bold text-indigo-900 block text-[10px] flex items-center gap-1">
+                                <span>📦</span> Componentes a Descontar:
+                              </span>
+                              <div className="space-y-1 text-[10px] text-indigo-900 font-medium">
+                                {(p.producto_componentes || []).map((c, idx) => {
+                                  const compProd = productos.find(item => item.id === c.componente_id)
+                                  const cantTotal = c.cantidad * (item.cantidad_cajas || item.piezas_sueltas || 1)
+                                  return (
+                                    <div key={idx} className="flex justify-between items-center bg-white/80 px-2 py-1 rounded border border-indigo-100">
+                                      <span>🔹 <strong>{cantTotal}x</strong> {compProd?.nombre || c.componente_id}</span>
+                                      <span className="text-gray-500 text-[9px] font-mono">
+                                        (Stock: {compProd?.stock || 0} unds)
+                                      </span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )}
+
                           {/* Costo de Adquisición */}
                           <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-500">
                             <span className="font-semibold text-gray-400 uppercase text-[9px]">Costo: S/.</span>
@@ -952,6 +1011,7 @@ export default function RegistroVentas({
                               className="border text-center w-16 p-0.5 rounded text-[11px] text-gray-700 bg-white"
                             />
                           </div>
+
 
                           {/* SECCIÓN COMPRA AL PASO */}
                           <div className="mt-3 p-2 bg-amber-50/70 border border-amber-200 rounded-lg text-xs space-y-2">

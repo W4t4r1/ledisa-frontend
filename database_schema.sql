@@ -657,3 +657,234 @@ ALTER TABLE inventario ADD COLUMN IF NOT EXISTS ubicacion_fisica VARCHAR(100);
 -- 6. MIGRACIÓN: Agregar columna estado_factura en compras
 ALTER TABLE compras ADD COLUMN IF NOT EXISTS estado_factura VARCHAR(20) DEFAULT 'FACTURADO';
 
+-- ==========================================
+-- SECCIÓN: PRODUCTOS COMBO / KITS (1/2 BAÑO, INODOROS, ETC.)
+-- ==========================================
+
+-- 1. Agregar columna es_combo a la tabla inventario
+ALTER TABLE inventario ADD COLUMN IF NOT EXISTS es_combo BOOLEAN DEFAULT FALSE;
+
+-- 2. TABLA: Componentes de Productos Combo
+CREATE TABLE IF NOT EXISTS producto_componentes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    combo_id VARCHAR(100) NOT NULL REFERENCES inventario(id) ON DELETE CASCADE,
+    componente_id VARCHAR(100) NOT NULL REFERENCES inventario(id) ON DELETE CASCADE,
+    cantidad INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    UNIQUE (combo_id, componente_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_prod_comp_combo ON producto_componentes(combo_id);
+CREATE INDEX IF NOT EXISTS idx_prod_comp_componente ON producto_componentes(componente_id);
+
+-- 3. ACTUALIZACIÓN DEL RPC: registrar_venta CON SOPORTE PARA PRODUCTOS COMBO
+CREATE OR REPLACE FUNCTION registrar_venta(
+    p_cliente_id UUID,
+    p_subtotal NUMERIC,
+    p_descuento NUMERIC,
+    p_total NUMERIC,
+    p_metodo_pago VARCHAR,
+    p_estado VARCHAR,
+    p_nota TEXT,
+    p_items JSONB
+) RETURNS VARCHAR AS $$
+DECLARE
+    v_venta_id UUID;
+    v_codigo_venta VARCHAR(30);
+    v_prefix VARCHAR(2);
+    v_item JSONB;
+    v_producto_id VARCHAR(100);
+    v_cant_cajas INT;
+    v_pzs_sueltas INT;
+    v_precio_unit NUMERIC;
+    v_costo_unit NUMERIC;
+    v_pzs_por_caja INT;
+    v_subtotal_item NUMERIC;
+    v_costo_item NUMERIC;
+    v_total_costo NUMERIC := 0.00;
+    v_stock_actual INT;
+    v_pzs_actual INT;
+    v_nombre_prod TEXT;
+    v_m2_caja NUMERIC;
+    v_costo_prod NUMERIC;
+    v_es_combo BOOLEAN;
+    v_sesion_caja_id UUID;
+    
+    -- Variables para iterar componentes de combo
+    v_comp RECORD;
+    v_cant_comp_req INT;
+    v_tiene_componentes BOOLEAN;
+BEGIN
+    -- Buscar sesión de caja abierta activa
+    SELECT id INTO v_sesion_caja_id 
+    FROM cajas_sesiones 
+    WHERE estado = 'ABIERTA' 
+    ORDER BY fecha_apertura DESC 
+    LIMIT 1;
+
+    IF p_estado = 'COTIZACION' THEN
+        v_prefix := 'C-';
+    ELSE
+        v_prefix := 'V-';
+    END IF;
+
+    v_codigo_venta := v_prefix || TO_CHAR(NOW(), 'YYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 10000)::TEXT, 4, '0');
+
+    -- Iteración 1: Calcular total_costo acumulado de la venta (soporta combos)
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+        v_producto_id := (v_item->>'producto_id');
+        v_cant_cajas := COALESCE((v_item->>'cantidad_cajas')::INT, 0);
+        v_pzs_sueltas := COALESCE((v_item->>'piezas_sueltas')::INT, 0);
+        v_pzs_por_caja := COALESCE((v_item->>'piezas_por_caja')::INT, 6);
+
+        SELECT stock, piezas_sueltas, nombre, m2_caja, costo, COALESCE(es_combo, FALSE)
+        INTO v_stock_actual, v_pzs_actual, v_nombre_prod, v_m2_caja, v_costo_prod, v_es_combo
+        FROM inventario
+        WHERE id = v_producto_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'El producto con código % no existe en el inventario.', v_producto_id;
+        END IF;
+
+        -- Verificar si tiene componentes en producto_componentes
+        SELECT EXISTS (SELECT 1 FROM producto_componentes WHERE combo_id = v_producto_id) INTO v_tiene_componentes;
+
+        IF v_es_combo OR v_tiene_componentes THEN
+            -- Calcular costo del combo sumando el costo de sus componentes
+            v_costo_item := 0.00;
+            FOR v_comp IN 
+                SELECT pc.componente_id, pc.cantidad, COALESCE(i.costo, 0) as costo_comp
+                FROM producto_componentes pc
+                JOIN inventario i ON pc.componente_id = i.id
+                WHERE pc.combo_id = v_producto_id
+            LOOP
+                v_cant_comp_req := (v_cant_cajas + v_pzs_sueltas) * v_comp.cantidad;
+                v_costo_item := v_costo_item + (v_cant_comp_req * v_comp.costo_comp);
+            END LOOP;
+        ELSE
+            v_costo_unit := COALESCE((v_item->>'costo_unitario')::NUMERIC, v_costo_prod);
+            IF v_m2_caja > 0 THEN
+                v_costo_item := ((v_cant_cajas * v_m2_caja) + (v_pzs_sueltas * (v_m2_caja / v_pzs_por_caja))) * v_costo_unit;
+            ELSE
+                v_costo_item := v_pzs_sueltas * v_costo_unit;
+            END IF;
+        END IF;
+
+        v_total_costo := v_total_costo + v_costo_item;
+    END LOOP;
+
+    -- Registrar la venta vinculando la sesion_caja_id
+    INSERT INTO ventas (codigo_venta, cliente_id, subtotal, descuento, total, total_costo, metodo_pago, estado, nota, sesion_caja_id)
+    VALUES (v_codigo_venta, p_cliente_id, p_subtotal, p_descuento, p_total, v_total_costo, p_metodo_pago, p_estado, p_nota, v_sesion_caja_id)
+    RETURNING id INTO v_venta_id;
+
+    -- Iteración 2: Registrar ventas_detalle, actualizar stock y Kardex
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+        v_producto_id := (v_item->>'producto_id');
+        v_cant_cajas := COALESCE((v_item->>'cantidad_cajas')::INT, 0);
+        v_pzs_sueltas := COALESCE((v_item->>'piezas_sueltas')::INT, 0);
+        v_precio_unit := (v_item->>'precio_unitario')::NUMERIC;
+        v_subtotal_item := (v_item->>'subtotal')::NUMERIC;
+
+        SELECT stock, piezas_sueltas, nombre, m2_caja, costo, COALESCE(es_combo, FALSE)
+        INTO v_stock_actual, v_pzs_actual, v_nombre_prod, v_m2_caja, v_costo_prod, v_es_combo
+        FROM inventario
+        WHERE id = v_producto_id;
+
+        v_costo_unit := COALESCE((v_item->>'costo_unitario')::NUMERIC, v_costo_prod);
+
+        SELECT EXISTS (SELECT 1 FROM producto_componentes WHERE combo_id = v_producto_id) INTO v_tiene_componentes;
+
+        IF p_estado IN ('PAGADO', 'ENTREGADO') THEN
+            IF v_es_combo OR v_tiene_componentes THEN
+                -- Descontar stock y registrar Kardex de cada componente individual
+                FOR v_comp IN 
+                    SELECT pc.componente_id, pc.cantidad, i.stock as stock_comp, i.piezas_sueltas as pzs_comp, i.nombre as nombre_comp, i.m2_caja as m2_comp
+                    FROM producto_componentes pc
+                    JOIN inventario i ON pc.componente_id = i.id
+                    WHERE pc.combo_id = v_producto_id
+                LOOP
+                    v_cant_comp_req := (v_cant_cajas + v_pzs_sueltas) * v_comp.cantidad;
+
+                    IF v_comp.m2_caja > 0 THEN
+                        IF v_comp.stock_comp < v_cant_comp_req THEN
+                            RAISE EXCEPTION 'Stock insuficiente para el componente % del combo %: stock actual % cjs, requerido % cjs.',
+                                v_comp.nombre_comp, v_nombre_prod, v_comp.stock_comp, v_cant_comp_req;
+                        END IF;
+                        UPDATE inventario 
+                        SET stock = stock - v_cant_comp_req
+                        WHERE id = v_comp.componente_id;
+
+                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                        VALUES (v_comp.componente_id, 'SALIDA', v_cant_comp_req, 0, 'VENTA', v_venta_id);
+                    ELSE
+                        IF v_comp.stock_comp < v_cant_comp_req THEN
+                            RAISE EXCEPTION 'Stock insuficiente para el componente % del combo %: stock actual % unds, requerido % unds.',
+                                v_comp.nombre_comp, v_nombre_prod, v_comp.stock_comp, v_cant_comp_req;
+                        END IF;
+                        UPDATE inventario 
+                        SET stock = stock - v_cant_comp_req,
+                            piezas_sueltas = 0
+                        WHERE id = v_comp.componente_id;
+
+                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                        VALUES (v_comp.componente_id, 'SALIDA', 0, v_cant_comp_req, 'VENTA', v_venta_id);
+                    END IF;
+                END LOOP;
+            ELSE
+                -- Descuenta producto estándar
+                IF v_m2_caja > 0 THEN
+                    DECLARE
+                        v_pzs_faltantes INT := 0;
+                        v_cajas_a_abrir INT := 0;
+                        v_pzs_totales_disp INT;
+                        v_pzs_totales_req INT;
+                    BEGIN
+                        v_pzs_totales_disp := (v_stock_actual * v_pzs_por_caja) + v_pzs_actual;
+                        v_pzs_totales_req := (v_cant_cajas * v_pzs_por_caja) + v_pzs_sueltas;
+
+                        IF v_pzs_totales_disp < v_pzs_totales_req THEN
+                            RAISE EXCEPTION 'Stock insuficiente para % (%): stock total disp. % pzs (% cjs + % pzs). Requerido % pzs (% cjs + % pzs).', 
+                                v_nombre_prod, v_producto_id, v_pzs_totales_disp, v_stock_actual, v_pzs_actual, v_pzs_totales_req, v_cant_cajas, v_pzs_sueltas;
+                        END IF;
+
+                        IF v_pzs_actual < v_pzs_sueltas THEN
+                            v_pzs_faltantes := v_pzs_sueltas - v_pzs_actual;
+                            v_cajas_a_abrir := CEIL(v_pzs_faltantes::NUMERIC / v_pzs_por_caja::NUMERIC)::INT;
+                        END IF;
+
+                        UPDATE inventario 
+                        SET stock = stock - v_cant_cajas - v_cajas_a_abrir,
+                            piezas_sueltas = piezas_sueltas + (v_cajas_a_abrir * v_pzs_por_caja) - v_pzs_sueltas
+                        WHERE id = v_producto_id;
+
+                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                        VALUES (v_producto_id, 'SALIDA', v_cant_cajas + v_cajas_a_abrir, v_pzs_sueltas, 'VENTA', v_venta_id);
+                    END;
+                ELSE
+                    IF v_stock_actual < v_pzs_sueltas THEN
+                        RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % unidades. Requerido % unidades.', 
+                            v_nombre_prod, v_producto_id, v_stock_actual, v_pzs_sueltas;
+                    END IF;
+
+                    UPDATE inventario 
+                    SET stock = stock - v_pzs_sueltas,
+                        piezas_sueltas = 0
+                    WHERE id = v_producto_id;
+
+                    INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                    VALUES (v_producto_id, 'SALIDA', 0, v_pzs_sueltas, 'VENTA', v_venta_id);
+                END IF;
+            END IF;
+        END IF;
+
+        INSERT INTO ventas_detalle (venta_id, producto_id, cantidad_cajas, piezas_sueltas, precio_unitario, costo_unitario, subtotal)
+        VALUES (v_venta_id, v_producto_id, v_cant_cajas, v_pzs_sueltas, v_precio_unit, v_costo_unit, v_subtotal_item);
+
+    END LOOP;
+
+    RETURN v_codigo_venta;
+END;
+$$ LANGUAGE plpgsql;
+
+

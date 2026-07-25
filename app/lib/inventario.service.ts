@@ -1,16 +1,100 @@
 import { supabase } from './supabase'
 
+export interface ComponenteCombo {
+  componente_id: string
+  cantidad: number
+}
+
 export async function getInventarioCompleto() {
   const { data, error } = await supabase
     .from('inventario')
-    .select('*')
+    .select(`
+      *,
+      producto_componentes:producto_componentes!combo_id(
+        componente_id,
+        cantidad
+      )
+    `)
     .order('nombre', { ascending: true })
 
   if (error) {
-    throw new Error(`Fallo en Supabase: ${error.message}`)
+    // Si falla el join (por ejemplo si la migración aún se está corriendo), fallback a select simple
+    const { data: fallbackData, error: fallbackErr } = await supabase
+      .from('inventario')
+      .select('*')
+      .order('nombre', { ascending: true })
+
+    if (fallbackErr) {
+      throw new Error(`Fallo en Supabase: ${fallbackErr.message}`)
+    }
+    return fallbackData || []
   }
 
   return data || []
+}
+
+/**
+  * Obtiene la lista de componentes de un producto combo por su ID
+  */
+export async function getComponentesCombo(comboId: string) {
+  const { data, error } = await supabase
+    .from('producto_componentes')
+    .select(`
+      id,
+      combo_id,
+      componente_id,
+      cantidad,
+      inventario:componente_id (
+        id,
+        nombre,
+        categoria,
+        stock,
+        costo,
+        precio
+      )
+    `)
+    .eq('combo_id', comboId)
+
+  if (error) {
+    console.error('Error al cargar componentes del combo:', error)
+    return []
+  }
+
+  return data || []
+}
+
+/**
+  * Guarda o actualiza los componentes de un producto combo en producto_componentes
+  */
+export async function guardarComponentesCombo(comboId: string, componentes: ComponenteCombo[]) {
+  // 1. Eliminar componentes existentes del combo
+  const { error: errDelete } = await supabase
+    .from('producto_componentes')
+    .delete()
+    .eq('combo_id', comboId)
+
+  if (errDelete) {
+    throw new Error(`Error al limpiar componentes anteriores: ${errDelete.message}`)
+  }
+
+  // 2. Insertar si hay nuevos componentes
+  if (componentes && componentes.length > 0) {
+    const filas = componentes.map(c => ({
+      combo_id: comboId,
+      componente_id: c.componente_id,
+      cantidad: Math.max(1, c.cantidad || 1)
+    }))
+
+    const { error: errInsert } = await supabase
+      .from('producto_componentes')
+      .insert(filas)
+
+    if (errInsert) {
+      throw new Error(`Error al insertar componentes del combo: ${errInsert.message}`)
+    }
+  }
+
+  return true
 }
 
 export interface AjusteStockData {
@@ -110,4 +194,4 @@ export async function registrarAjusteInventario(ajuste: AjusteStockData): Promis
   }
 
   return true
-}
+}

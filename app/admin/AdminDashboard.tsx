@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { eliminarProducto, guardarProducto, toggleVisibilidadProducto, actualizarProductosMasivo } from './actions'
+import { eliminarProducto, guardarProducto, toggleVisibilidadProducto, actualizarProductosMasivo, obtenerComponentesProductoAction } from './actions'
 import { obtenerSeccionProducto } from '../components/CatalogoInteractivo'
 
 export default function AdminDashboard({ inventarioInicial }: { inventarioInicial: any[] }) {
@@ -16,8 +16,13 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
   const [form, setForm] = useState({
     id: '', nombre: '', categoria: 'Porcelanato', marca: '',
     precio: 0, costo: 0, stock: 0, stock_minimo: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '',
-    ubicacion_fisica: '', oculto: false
+    ubicacion_fisica: '', oculto: false, es_combo: false
   })
+
+  // Estado para gestión de componentes de combo
+  const [componentesCombo, setComponentesCombo] = useState<{ componente_id: string; cantidad: number }[]>([])
+  const [selComponenteId, setSelComponenteId] = useState('')
+  const [selComponenteCant, setSelComponenteCant] = useState(1)
 
   // Estado para Edición Masiva (Por Lote)
   const [idsSeleccionados, setIdsSeleccionados] = useState<string[]>([])
@@ -30,6 +35,26 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
     actMarca: false, marca: '',
     actVisibilidad: false, oculto: false
   })
+
+  // Función para calcular stock de combo en base a componentes
+  const getStockComboDisponibles = (item: any) => {
+    const comps = item.producto_componentes || []
+    if (item.es_combo || comps.length > 0) {
+      if (!comps || comps.length === 0) return 0
+      let minCombos = Infinity
+      for (const c of comps) {
+        const compProd = inventarioInicial.find(p => p.id === c.componente_id)
+        const stockComp = compProd ? compProd.stock : 0
+        const req = c.cantidad || 1
+        const posibles = Math.floor(stockComp / req)
+        if (posibles < minCombos) {
+          minCombos = posibles
+        }
+      }
+      return minCombos === Infinity ? 0 : minCombos
+    }
+    return item.stock
+  }
 
   // Filtro rápido en memoria
   const productosFiltrados = inventarioInicial.filter(item => 
@@ -79,11 +104,12 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
     })
   }
 
-  const handleAbrirModal = (producto: any = null) => {
+  const handleAbrirModal = async (producto: any = null) => {
     if (producto) {
       setForm({
         ...producto,
         oculto: !!producto.oculto,
+        es_combo: !!producto.es_combo,
         piezas_sueltas: producto.piezas_sueltas || 0,
         m2_caja: producto.m2_caja || 0,
         costo: producto.costo || 0,
@@ -91,18 +117,70 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
         ubicacion_fisica: producto.ubicacion_fisica || ''
       })
       setEsEdicion(true)
+
+      if (producto.producto_componentes?.length > 0) {
+        setComponentesCombo(producto.producto_componentes.map((c: any) => ({
+          componente_id: c.componente_id,
+          cantidad: c.cantidad
+        })))
+      } else if (producto.es_combo) {
+        try {
+          const comps = await obtenerComponentesProductoAction(producto.id)
+          setComponentesCombo(comps.map((c: any) => ({
+            componente_id: c.componente_id,
+            cantidad: c.cantidad
+          })))
+        } catch (err) {
+          setComponentesCombo([])
+        }
+      } else {
+        setComponentesCombo([])
+      }
     } else {
-      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, costo: 0, stock: 0, stock_minimo: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '', ubicacion_fisica: '', oculto: false })
+      setForm({ id: '', nombre: '', categoria: 'Porcelanato', marca: '', precio: 0, costo: 0, stock: 0, stock_minimo: 0, m2_caja: 0, piezas_sueltas: 0, color: '', imagen: '', ubicacion_fisica: '', oculto: false, es_combo: false })
+      setComponentesCombo([])
       setEsEdicion(false)
     }
+    setSelComponenteId('')
+    setSelComponenteCant(1)
     setMostrarModal(true)
+  }
+
+  const handleAddComboComponente = () => {
+    if (!selComponenteId) {
+      alert('Selecciona un producto componente.')
+      return
+    }
+    if (selComponenteId === form.id) {
+      alert('Un combo no puede ser componente de sí mismo.')
+      return
+    }
+    const existe = componentesCombo.find(c => c.componente_id === selComponenteId)
+    if (existe) {
+      setComponentesCombo(componentesCombo.map(c => 
+        c.componente_id === selComponenteId ? { ...c, cantidad: c.cantidad + selComponenteCant } : c
+      ))
+    } else {
+      setComponentesCombo([...componentesCombo, { componente_id: selComponenteId, cantidad: selComponenteCant }])
+    }
+    setSelComponenteId('')
+    setSelComponenteCant(1)
+  }
+
+  const handleRemoveComboComponente = (compId: string) => {
+    setComponentesCombo(componentesCombo.filter(c => c.componente_id !== compId))
   }
 
   const handleGuardar = (e: React.FormEvent) => {
     e.preventDefault()
+    if (form.es_combo && componentesCombo.length === 0) {
+      alert('⚠️ Para registrar un Producto Combo debes seleccionar al menos 1 producto componente.')
+      return
+    }
+
     startTransition(async () => {
       try {
-        const resProd = await guardarProducto(form, esEdicion)
+        const resProd = await guardarProducto(form, esEdicion, form.es_combo ? componentesCombo : [])
         if (!resProd.success) {
           throw new Error(resProd.error || 'Error al guardar el producto')
         }
@@ -219,99 +297,122 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {productosFiltrados.map((item) => (
-              <tr key={item.id} className={`hover:bg-gray-50 transition-colors ${idsSeleccionados.includes(item.id) ? 'bg-indigo-50/40' : item.oculto ? 'opacity-60 bg-gray-50/50' : ''}`}>
-                <td className="p-3 text-center">
-                  <input 
-                    type="checkbox"
-                    checked={idsSeleccionados.includes(item.id)}
-                    onChange={() => handleToggleSeleccionarUno(item.id)}
-                    className="w-4 h-4 text-[#04558C] rounded focus:ring-[#04558C] cursor-pointer"
-                  />
-                </td>
-                <td className="p-3 text-sm font-mono text-gray-500">{item.id}</td>
-                <td className="p-3">
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-gray-800">{item.nombre}</span>
-                      {item.oculto && (
-                        <span className="text-[10px] bg-gray-400 text-white font-bold px-1.5 py-0.5 rounded tracking-wide">OCULTO</span>
+            {productosFiltrados.map((item) => {
+              const esComboItem = !!item.es_combo || (item.producto_componentes && item.producto_componentes.length > 0)
+              const stockCombo = esComboItem ? getStockComboDisponibles(item) : item.stock
+
+              return (
+                <tr key={item.id} className={`hover:bg-gray-50 transition-colors ${idsSeleccionados.includes(item.id) ? 'bg-indigo-50/40' : item.oculto ? 'opacity-60 bg-gray-50/50' : ''}`}>
+                  <td className="p-3 text-center">
+                    <input 
+                      type="checkbox"
+                      checked={idsSeleccionados.includes(item.id)}
+                      onChange={() => handleToggleSeleccionarUno(item.id)}
+                      className="w-4 h-4 text-[#04558C] rounded focus:ring-[#04558C] cursor-pointer"
+                    />
+                  </td>
+                  <td className="p-3 text-sm font-mono text-gray-500">{item.id}</td>
+                  <td className="p-3">
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-gray-800">{item.nombre}</span>
+                        {esComboItem && (
+                          <span className="text-[10px] bg-indigo-600 text-white font-bold px-1.5 py-0.5 rounded tracking-wide flex items-center gap-1 shadow-xs">
+                            📦 COMBO ({item.producto_componentes?.length || 0} ítems)
+                          </span>
+                        )}
+                        {item.oculto && (
+                          <span className="text-[10px] bg-gray-400 text-white font-bold px-1.5 py-0.5 rounded tracking-wide">OCULTO</span>
+                        )}
+                      </div>
+                      {item.ubicacion_fisica && (
+                        <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded border border-indigo-200 w-max mt-1">
+                          📍 {item.ubicacion_fisica}
+                        </span>
                       )}
                     </div>
-                    {item.ubicacion_fisica && (
-                      <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded border border-indigo-200 w-max mt-1">
-                        📍 {item.ubicacion_fisica}
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td className="p-3 text-right font-medium text-gray-500">S/. {item.costo || '0.00'}</td>
-                <td className="p-3 text-right font-bold text-[#04558C]">S/. {item.precio}</td>
-                <td className="p-3 text-center">
-                  <div className="flex flex-col items-center gap-0.5">
-                    {item.m2_caja > 0 ? (
-                      <>
-                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                          item.stock <= (item.stock_minimo || 0)
-                            ? 'bg-red-100 text-red-800 border border-red-200'
-                            : 'bg-green-100 text-green-800 border border-green-200'
-                        }`}>
-                          {item.stock} cjs {item.piezas_sueltas > 0 ? `+ ${item.piezas_sueltas} pzs` : ''}
-                        </span>
-                        {item.stock <= (item.stock_minimo || 0) && (
-                          <span className="text-[9px] text-red-600 font-extrabold uppercase tracking-wide mt-0.5">
-                            ⚠️ Stock Mínimo ({item.stock_minimo || 0})
+                  </td>
+                  <td className="p-3 text-right font-medium text-gray-500">S/. {item.costo || '0.00'}</td>
+                  <td className="p-3 text-right font-bold text-[#04558C]">S/. {item.precio}</td>
+                  <td className="p-3 text-center">
+                    <div className="flex flex-col items-center gap-0.5">
+                      {esComboItem ? (
+                        <>
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            stockCombo <= (item.stock_minimo || 0)
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : 'bg-indigo-100 text-indigo-900 border border-indigo-200'
+                          }`}>
+                            📦 {stockCombo} juegos dispon.
                           </span>
-                        )}
-                        <span className="text-[10px] text-gray-500 font-semibold">
-                          ({(item.stock * item.m2_caja).toFixed(2)} m²)
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                          item.stock <= (item.stock_minimo || 0)
-                            ? 'bg-red-100 text-red-800 border border-red-200'
-                            : 'bg-green-100 text-green-800 border border-green-200'
-                        }`}>
-                          {item.stock} {['mayolicas_porcelanatos', 'saldos', 'decoraciones'].includes(obtenerSeccionProducto(item)) ? 'pzs' : 'und'}
-                        </span>
-                        {item.stock <= (item.stock_minimo || 0) && (
-                          <span className="text-[9px] text-red-600 font-extrabold uppercase tracking-wide mt-0.5">
-                            ⚠️ Stock Mínimo ({item.stock_minimo || 0})
+                          <span className="text-[9px] text-gray-500 font-semibold">
+                            (Stock dinámico según componentes)
                           </span>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </td>
-                <td className="p-3 text-center">
-                  <button 
-                    onClick={() => handleToggleVisibilidad(item.id, !!item.oculto)} 
-                    disabled={isPending} 
-                    className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center justify-center disabled:opacity-50"
-                    title={item.oculto ? "Mostrar en catálogo" : "Ocultar en catálogo"}
-                  >
-                    {item.oculto ? (
-                      <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                      </svg>
-                    ) : (
-                      <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                    )}
-                  </button>
-                </td>
-                <td className="p-3 text-center">
-                  <div className="flex justify-center gap-2">
-                    <button onClick={() => handleAbrirModal(item)} disabled={isPending} className="text-blue-600 hover:text-blue-800 text-sm font-semibold disabled:opacity-50">Editar</button>
-                    <button onClick={() => handleEliminar(item.id, item.nombre)} disabled={isPending} className="text-red-600 hover:text-red-800 text-sm font-semibold disabled:opacity-50">Eliminar</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                        </>
+                      ) : item.m2_caja > 0 ? (
+                        <>
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            item.stock <= (item.stock_minimo || 0)
+                              ? 'bg-red-100 text-red-800 border border-red-200'
+                              : 'bg-green-100 text-green-800 border border-green-200'
+                          }`}>
+                            {item.stock} cjs {item.piezas_sueltas > 0 ? `+ ${item.piezas_sueltas} pzs` : ''}
+                          </span>
+                          {item.stock <= (item.stock_minimo || 0) && (
+                            <span className="text-[9px] text-red-600 font-extrabold uppercase tracking-wide mt-0.5">
+                              ⚠️ Stock Mínimo ({item.stock_minimo || 0})
+                            </span>
+                          )}
+                          <span className="text-[10px] text-gray-500 font-semibold">
+                            ({(item.stock * item.m2_caja).toFixed(2)} m²)
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            item.stock <= (item.stock_minimo || 0)
+                              ? 'bg-red-100 text-red-800 border border-red-200'
+                              : 'bg-green-100 text-green-800 border border-green-200'
+                          }`}>
+                            {item.stock} {['mayolicas_porcelanatos', 'saldos', 'decoraciones'].includes(obtenerSeccionProducto(item)) ? 'pzs' : 'und'}
+                          </span>
+                          {item.stock <= (item.stock_minimo || 0) && (
+                            <span className="text-[9px] text-red-600 font-extrabold uppercase tracking-wide mt-0.5">
+                              ⚠️ Stock Mínimo ({item.stock_minimo || 0})
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </td>
+                  <td className="p-3 text-center">
+                    <button 
+                      onClick={() => handleToggleVisibilidad(item.id, !!item.oculto)} 
+                      disabled={isPending} 
+                      className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center justify-center disabled:opacity-50"
+                      title={item.oculto ? "Mostrar en catálogo" : "Ocultar en catálogo"}
+                    >
+                      {item.oculto ? (
+                        <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </td>
+                  <td className="p-3 text-center">
+                    <div className="flex justify-center gap-2">
+                      <button onClick={() => handleAbrirModal(item)} disabled={isPending} className="text-blue-600 hover:text-blue-800 text-sm font-semibold disabled:opacity-50">Editar</button>
+                      <button onClick={() => handleEliminar(item.id, item.nombre)} disabled={isPending} className="text-red-600 hover:text-red-800 text-sm font-semibold disabled:opacity-50">Eliminar</button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -341,7 +442,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                   <div className="flex flex-col gap-1.5 max-h-28 overflow-y-auto border border-gray-200 p-2 rounded bg-gray-50">
                     {[
                       { g: '💎 Mayólicas', c: ['Piso', 'Pared', 'Porcelanato'] },
-                      { g: '🚽 Sanitarios', c: ['Inodoro', 'Taza', 'Tanque', 'Lavatorio', 'Tubo de abasto'] },
+                      { g: '🚽 Sanitarios', c: ['1/2 Baño', 'Inodoro', 'Taza', 'Tanque', 'Lavatorio', 'Pedestal', 'Tubo de abasto'] },
                       { g: '✨ Decoraciones', c: ['Listelo', 'Decorado'] },
                       { g: '🚰 Griferías', c: ['Grifería', 'Mezcladora'] },
                       { g: '🛠️ Instalación', c: ['Fragua', 'Varillas', 'Pegamento', 'Crucetas'] },
@@ -396,12 +497,14 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                 <input required type="number" step="0.01" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.precio} onChange={e => setForm({...form, precio: parseFloat(e.target.value) || 0})} />
               </div>
               <div className="col-span-2 md:col-span-1">
-                <label className="text-xs font-bold text-gray-500 block mb-1">Stock (Cajas)*</label>
-                <input required type="number" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.stock} onChange={e => setForm({...form, stock: parseInt(e.target.value) || 0})} />
+                <label className="text-xs font-bold text-gray-500 block mb-1">Stock {form.es_combo ? '(Referencial)' : '(Cajas/Unidades)*'}</label>
+                <input required={!form.es_combo} type="number" className="w-full border p-2 rounded text-gray-900 bg-white" value={form.stock} onChange={e => setForm({...form, stock: parseInt(e.target.value) || 0})} />
                 <span className="text-[10px] text-gray-400 block mt-1">
-                  {form.m2_caja > 0 
-                    ? `Equivale a ${(form.stock * form.m2_caja).toFixed(2)} m² totales en stock` 
-                    : 'Cantidad de piezas o unidades físicas en stock'}
+                  {form.es_combo
+                    ? 'En combos el stock disponible real se calcula dinámicamente según sus componentes'
+                    : form.m2_caja > 0 
+                      ? `Equivale a ${(form.stock * form.m2_caja).toFixed(2)} m² totales en stock` 
+                      : 'Cantidad de piezas o unidades físicas en stock'}
                 </span>
               </div>
               <div className="col-span-2 md:col-span-1">
@@ -442,6 +545,101 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
                   <option value="Exhibición">Exhibición</option>
                 </select>
               </div>
+
+              {/* SECCIÓN CONFIGURACIÓN PRODUCTO COMBO */}
+              <div className="col-span-2 bg-indigo-50 border border-indigo-200 rounded-lg p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="form-es-combo"
+                    className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                    checked={form.es_combo || false} 
+                    onChange={e => setForm({...form, es_combo: e.target.checked})} 
+                  />
+                  <label htmlFor="form-es-combo" className="text-sm font-bold text-indigo-900 cursor-pointer select-none flex items-center gap-1.5">
+                    <span>📦</span> Es Producto Combo / Kit (Ej: 1/2 Baño, Inodoro Completo)
+                  </label>
+                </div>
+                <p className="text-[11px] text-indigo-700">
+                  Al vender este producto, se descontará automáticamente del stock de cada uno de sus componentes individuales.
+                </p>
+
+                {form.es_combo && (
+                  <div className="space-y-2 pt-2 border-t border-indigo-200">
+                    <span className="text-xs font-bold text-indigo-950 block">Seleccionar Componentes que incluye:</span>
+                    
+                    <div className="flex gap-2">
+                      <select 
+                        value={selComponenteId} 
+                        onChange={e => setSelComponenteId(e.target.value)}
+                        className="flex-1 border border-indigo-300 rounded p-1.5 text-xs text-gray-900 bg-white"
+                      >
+                        <option value="">-- Seleccionar producto componente --</option>
+                        {inventarioInicial
+                          .filter(p => p.id !== form.id && !p.es_combo)
+                          .map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre} ({p.id}) - Stock: {p.stock} und
+                            </option>
+                          ))
+                        }
+                      </select>
+                      <input 
+                        type="number" 
+                        min="1" 
+                        value={selComponenteCant} 
+                        onChange={e => setSelComponenteCant(parseInt(e.target.value) || 1)}
+                        className="w-16 border border-indigo-300 rounded p-1.5 text-xs text-gray-900 text-center bg-white font-bold"
+                        placeholder="Cant"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddComboComponente}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1.5 rounded text-xs transition-colors cursor-pointer"
+                      >
+                        + Agregar
+                      </button>
+                    </div>
+
+                    {/* Lista de componentes agregados */}
+                    {componentesCombo.length > 0 ? (
+                      <div className="bg-white rounded border border-indigo-200 divide-y divide-gray-100 overflow-hidden mt-2">
+                        {componentesCombo.map((c, idx) => {
+                          const prodComp = inventarioInicial.find(p => p.id === c.componente_id)
+                          return (
+                            <div key={idx} className="flex justify-between items-center p-2 text-xs">
+                              <div>
+                                <span className="font-bold text-gray-800">{prodComp?.nombre || c.componente_id}</span>
+                                <span className="text-gray-500 text-[10px] block">
+                                  Código: {c.componente_id} | Stock actual: {prodComp?.stock || 0} und
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded text-xs">
+                                  {c.cantidad} {c.cantidad === 1 ? 'unidad' : 'unidades'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveComboComponente(c.componente_id)}
+                                  className="text-red-500 hover:text-red-700 font-bold text-sm"
+                                  title="Quitar componente"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-amber-700 font-medium italic bg-amber-50 p-2 rounded border border-amber-200">
+                        ⚠️ Por favor agrega al menos 1 producto componente (Ej: Taza, Tanque, Lavatorio, Pedestal).
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="col-span-2 flex items-center gap-2 py-2">
                 <input 
                   type="checkbox" 
@@ -465,6 +663,7 @@ export default function AdminDashboard({ inventarioInicial }: { inventarioInicia
           </div>
         </div>
       )}
+
       {/* --- MODAL EDICIÓN MASIVA (POR LOTE) --- */}
       {mostrarModalMasivo && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
