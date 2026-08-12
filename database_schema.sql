@@ -888,3 +888,393 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+-- ==========================================
+-- SECCIÓN: MULTI-EMPRESA, PAGOS MIXTOS Y CUENTAS POR COBRAR
+-- ==========================================
+
+-- 1. TABLA: Empresas (Ledisa Palao vs. Corporación Oviedo)
+CREATE TABLE IF NOT EXISTS empresas (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nombre VARCHAR(100) NOT NULL UNIQUE,
+    ruc VARCHAR(20),
+    direccion TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- Insertar empresas por defecto
+INSERT INTO empresas (nombre, ruc) VALUES ('Ledisa (Palao)', '') ON CONFLICT (nombre) DO NOTHING;
+INSERT INTO empresas (nombre, ruc) VALUES ('Corporación Oviedo', '') ON CONFLICT (nombre) DO NOTHING;
+
+-- Asignar empresa_id a las tablas existentes
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL;
+ALTER TABLE cajas_sesiones ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL;
+ALTER TABLE compras ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL;
+ALTER TABLE inventario ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ventas_empresa ON ventas(empresa_id);
+CREATE INDEX IF NOT EXISTS idx_cajas_empresa ON cajas_sesiones(empresa_id);
+
+-- 2. PAGOS MIXTOS (Split Payments)
+CREATE TABLE IF NOT EXISTS venta_pagos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    venta_id UUID NOT NULL REFERENCES ventas(id) ON DELETE CASCADE,
+    metodo_pago VARCHAR(50) NOT NULL,
+    monto NUMERIC(12, 2) NOT NULL CHECK (monto >= 0),
+    referencia VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_venta_pagos_venta ON venta_pagos(venta_id);
+
+-- 3. CUENTAS POR COBRAR Y ABONOS (Ventas a Crédito y Cobro posterior)
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS estado_pago VARCHAR(20) DEFAULT 'PAGADO' CHECK (estado_pago IN ('PAGADO', 'PENDIENTE', 'PAGADO_PARCIAL'));
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS monto_pagado NUMERIC(12, 2) DEFAULT 0.00;
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS saldo_pendiente NUMERIC(12, 2) DEFAULT 0.00;
+
+CREATE TABLE IF NOT EXISTS venta_abonos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    venta_id UUID NOT NULL REFERENCES ventas(id) ON DELETE CASCADE,
+    cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
+    sesion_caja_id UUID REFERENCES cajas_sesiones(id) ON DELETE SET NULL,
+    empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL,
+    monto NUMERIC(12, 2) NOT NULL CHECK (monto > 0),
+    metodo_pago VARCHAR(50) NOT NULL,
+    referencia VARCHAR(100),
+    nota TEXT,
+    fecha TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_abonos_venta ON venta_abonos(venta_id);
+CREATE INDEX IF NOT EXISTS idx_abonos_cliente ON venta_abonos(cliente_id);
+CREATE INDEX IF NOT EXISTS idx_abonos_sesion ON venta_abonos(sesion_caja_id);
+
+-- 4. FUNCIÓN RPC: registrar_abono_venta
+CREATE OR REPLACE FUNCTION registrar_abono_venta(
+    p_venta_id UUID,
+    p_monto NUMERIC,
+    p_metodo_pago VARCHAR,
+    p_referencia VARCHAR DEFAULT NULL,
+    p_nota TEXT DEFAULT NULL
+) RETURNS NUMERIC AS $$
+DECLARE
+    v_venta RECORD;
+    v_sesion_caja_id UUID;
+    v_nuevo_monto_pagado NUMERIC;
+    v_nuevo_saldo NUMERIC;
+    v_nuevo_estado_pago VARCHAR(20);
+BEGIN
+    SELECT * INTO v_venta FROM ventas WHERE id = p_venta_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'No se encontró la venta especificada.';
+    END IF;
+
+    IF v_venta.saldo_pendiente <= 0 THEN
+        RAISE EXCEPTION 'Esta venta ya no tiene saldo pendiente por cobrar.';
+    END IF;
+
+    IF p_monto > v_venta.saldo_pendiente THEN
+        RAISE EXCEPTION 'El monto ingresado (S/ %) supera el saldo pendiente (S/ %).', p_monto, v_venta.saldo_pendiente;
+    END IF;
+
+    -- Buscar sesión de caja abierta para registrar el abono
+    SELECT id INTO v_sesion_caja_id 
+    FROM cajas_sesiones 
+    WHERE estado = 'ABIERTA' 
+    AND (empresa_id IS NULL OR empresa_id = v_venta.empresa_id)
+    ORDER BY fecha_apertura DESC 
+    LIMIT 1;
+
+    -- Registrar abono
+    INSERT INTO venta_abonos (venta_id, cliente_id, sesion_caja_id, empresa_id, monto, metodo_pago, referencia, nota)
+    VALUES (p_venta_id, v_venta.cliente_id, v_sesion_caja_id, v_venta.empresa_id, p_monto, p_metodo_pago, p_referencia, p_nota);
+
+    -- Actualizar saldos de la venta
+    v_nuevo_monto_pagado := COALESCE(v_venta.monto_pagado, 0.00) + p_monto;
+    v_nuevo_saldo := v_venta.total - v_nuevo_monto_pagado;
+
+    IF v_nuevo_saldo <= 0.01 THEN
+        v_nuevo_saldo := 0.00;
+        v_nuevo_estado_pago := 'PAGADO';
+    ELSE
+        v_nuevo_estado_pago := 'PAGADO_PARCIAL';
+    END IF;
+
+    UPDATE ventas 
+    SET monto_pagado = v_nuevo_monto_pagado,
+        saldo_pendiente = v_nuevo_saldo,
+        estado_pago = v_nuevo_estado_pago
+    WHERE id = p_venta_id;
+
+    RETURN v_nuevo_saldo;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 5. ACTUALIZACIÓN DEL RPC: registrar_venta con Soporte para Empresa, Pagos Mixtos y Crédito
+CREATE OR REPLACE FUNCTION registrar_venta(
+    p_cliente_id UUID,
+    p_subtotal NUMERIC,
+    p_descuento NUMERIC,
+    p_total NUMERIC,
+    p_metodo_pago VARCHAR,
+    p_estado VARCHAR,
+    p_nota TEXT,
+    p_items JSONB,
+    p_empresa_id UUID DEFAULT NULL,
+    p_estado_pago VARCHAR DEFAULT 'PAGADO',
+    p_pagos JSONB DEFAULT NULL
+) RETURNS VARCHAR AS $$
+DECLARE
+    v_venta_id UUID;
+    v_codigo_venta VARCHAR(30);
+    v_prefix VARCHAR(2);
+    v_item JSONB;
+    v_pago JSONB;
+    v_producto_id VARCHAR(100);
+    v_cant_cajas INT;
+    v_pzs_sueltas INT;
+    v_precio_unit NUMERIC;
+    v_costo_unit NUMERIC;
+    v_pzs_por_caja INT;
+    v_subtotal_item NUMERIC;
+    v_costo_item NUMERIC;
+    v_total_costo NUMERIC := 0.00;
+    v_stock_actual INT;
+    v_pzs_actual INT;
+    v_nombre_prod TEXT;
+    v_m2_caja NUMERIC;
+    v_costo_prod NUMERIC;
+    v_es_combo BOOLEAN;
+    v_sesion_caja_id UUID;
+    
+    v_comp RECORD;
+    v_cant_comp_req INT;
+    v_tiene_componentes BOOLEAN;
+
+    v_total_pagado NUMERIC := 0.00;
+    v_saldo_pend NUMERIC := 0.00;
+    v_metodo_pago_final VARCHAR(50);
+    v_est_pago_final VARCHAR(20);
+BEGIN
+    SELECT id INTO v_sesion_caja_id 
+    FROM cajas_sesiones 
+    WHERE estado = 'ABIERTA' 
+    AND (p_empresa_id IS NULL OR empresa_id IS NULL OR empresa_id = p_empresa_id)
+    ORDER BY fecha_apertura DESC 
+    LIMIT 1;
+
+    IF p_estado = 'COTIZACION' THEN
+        v_prefix := 'C-';
+        v_est_pago_final := 'PENDIENTE';
+    ELSE
+        v_prefix := 'V-';
+        v_est_pago_final := COALESCE(p_estado_pago, 'PAGADO');
+    END IF;
+
+    v_codigo_venta := v_prefix || TO_CHAR(NOW(), 'YYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 10000)::TEXT, 4, '0');
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+        v_producto_id := (v_item->>'producto_id');
+        v_cant_cajas := COALESCE((v_item->>'cantidad_cajas')::INT, 0);
+        v_pzs_sueltas := COALESCE((v_item->>'piezas_sueltas')::INT, 0);
+        v_pzs_por_caja := COALESCE((v_item->>'piezas_por_caja')::INT, 6);
+
+        SELECT stock, piezas_sueltas, nombre, m2_caja, costo, COALESCE(es_combo, FALSE)
+        INTO v_stock_actual, v_pzs_actual, v_nombre_prod, v_m2_caja, v_costo_prod, v_es_combo
+        FROM inventario
+        WHERE id = v_producto_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'El producto con código % no existe en el inventario.', v_producto_id;
+        END IF;
+
+        SELECT EXISTS (SELECT 1 FROM producto_componentes WHERE combo_id = v_producto_id) INTO v_tiene_componentes;
+
+        IF v_es_combo OR v_tiene_componentes THEN
+            v_costo_item := 0.00;
+            FOR v_comp IN 
+                SELECT pc.componente_id, pc.cantidad, COALESCE(i.costo, 0) as costo_comp
+                FROM producto_componentes pc
+                JOIN inventario i ON pc.componente_id = i.id
+                WHERE pc.combo_id = v_producto_id
+            LOOP
+                v_cant_comp_req := (v_cant_cajas + v_pzs_sueltas) * v_comp.cantidad;
+                v_costo_item := v_costo_item + (v_cant_comp_req * v_comp.costo_comp);
+            END LOOP;
+        ELSE
+            v_costo_unit := COALESCE((v_item->>'costo_unitario')::NUMERIC, v_costo_prod);
+            IF v_m2_caja > 0 THEN
+                v_costo_item := ((v_cant_cajas * v_m2_caja) + (v_pzs_sueltas * (v_m2_caja / v_pzs_por_caja))) * v_costo_unit;
+            ELSE
+                v_costo_item := v_pzs_sueltas * v_costo_unit;
+            END IF;
+        END IF;
+
+        v_total_costo := v_total_costo + v_costo_item;
+    END LOOP;
+
+    IF p_pagos IS NOT NULL AND jsonb_array_length(p_pagos) > 0 THEN
+        SELECT COALESCE(SUM((p->>'monto')::NUMERIC), 0.00) INTO v_total_pagado FROM jsonb_array_elements(p_pagos) p;
+        IF jsonb_array_length(p_pagos) = 1 THEN
+            v_metodo_pago_final := (p_pagos->0->>'metodo_pago');
+        ELSE
+            v_metodo_pago_final := 'Pago Mixto';
+        END IF;
+    ELSE
+        v_metodo_pago_final := COALESCE(p_metodo_pago, 'Efectivo');
+        IF v_est_pago_final = 'PAGADO' THEN
+            v_total_pagado := p_total;
+        ELSE
+            v_total_pagado := 0.00;
+        END IF;
+    END IF;
+
+    IF v_est_pago_final = 'PENDIENTE' THEN
+        v_total_pagado := COALESCE(v_total_pagado, 0.00);
+        v_saldo_pend := p_total - v_total_pagado;
+    ELSIF v_total_pagado < p_total THEN
+        v_saldo_pend := p_total - v_total_pagado;
+        IF v_total_pagado > 0 THEN
+            v_est_pago_final := 'PAGADO_PARCIAL';
+        ELSE
+            v_est_pago_final := 'PENDIENTE';
+        END IF;
+    ELSE
+        v_saldo_pend := 0.00;
+        v_est_pago_final := 'PAGADO';
+    END IF;
+
+    INSERT INTO ventas (
+        codigo_venta, cliente_id, subtotal, descuento, total, total_costo, 
+        metodo_pago, estado, nota, sesion_caja_id, empresa_id, estado_pago, 
+        monto_pagado, saldo_pendiente
+    )
+    VALUES (
+        v_codigo_venta, p_cliente_id, p_subtotal, p_descuento, p_total, v_total_costo, 
+        v_metodo_pago_final, p_estado, p_nota, v_sesion_caja_id, p_empresa_id, v_est_pago_final,
+        v_total_pagado, v_saldo_pend
+    )
+    RETURNING id INTO v_venta_id;
+
+    IF p_pagos IS NOT NULL AND jsonb_array_length(p_pagos) > 0 THEN
+        FOR v_pago IN SELECT * FROM jsonb_array_elements(p_pagos) LOOP
+            INSERT INTO venta_pagos (venta_id, metodo_pago, monto, referencia)
+            VALUES (
+                v_venta_id, 
+                (v_pago->>'metodo_pago'), 
+                (v_pago->>'monto')::NUMERIC, 
+                (v_pago->>'referencia')
+            );
+        END LOOP;
+    ELSIF v_total_pagado > 0 THEN
+        INSERT INTO venta_pagos (venta_id, metodo_pago, monto)
+        VALUES (v_venta_id, v_metodo_pago_final, v_total_pagado);
+    END IF;
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+        v_producto_id := (v_item->>'producto_id');
+        v_cant_cajas := COALESCE((v_item->>'cantidad_cajas')::INT, 0);
+        v_pzs_sueltas := COALESCE((v_item->>'piezas_sueltas')::INT, 0);
+        v_precio_unit := (v_item->>'precio_unitario')::NUMERIC;
+        v_subtotal_item := (v_item->>'subtotal')::NUMERIC;
+
+        SELECT stock, piezas_sueltas, nombre, m2_caja, costo, COALESCE(es_combo, FALSE)
+        INTO v_stock_actual, v_pzs_actual, v_nombre_prod, v_m2_caja, v_costo_prod, v_es_combo
+        FROM inventario
+        WHERE id = v_producto_id;
+
+        v_costo_unit := COALESCE((v_item->>'costo_unitario')::NUMERIC, v_costo_prod);
+
+        SELECT EXISTS (SELECT 1 FROM producto_componentes WHERE combo_id = v_producto_id) INTO v_tiene_componentes;
+
+        IF p_estado IN ('PAGADO', 'ENTREGADO') THEN
+            IF v_es_combo OR v_tiene_componentes THEN
+                FOR v_comp IN 
+                    SELECT pc.componente_id, pc.cantidad, i.stock as stock_comp, i.piezas_sueltas as pzs_comp, i.nombre as nombre_comp, i.m2_caja as m2_comp
+                    FROM producto_componentes pc
+                    JOIN inventario i ON pc.componente_id = i.id
+                    WHERE pc.combo_id = v_producto_id
+                LOOP
+                    v_cant_comp_req := (v_cant_cajas + v_pzs_sueltas) * v_comp.cantidad;
+
+                    IF v_comp.m2_caja > 0 THEN
+                        IF v_comp.stock_comp < v_cant_comp_req THEN
+                            RAISE EXCEPTION 'Stock insuficiente para el componente % del combo %: stock actual % cjs, requerido % cjs.',
+                                v_comp.nombre_comp, v_nombre_prod, v_comp.stock_comp, v_cant_comp_req;
+                        END IF;
+                        UPDATE inventario 
+                        SET stock = stock - v_cant_comp_req
+                        WHERE id = v_comp.componente_id;
+
+                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                        VALUES (v_comp.componente_id, 'SALIDA', v_cant_comp_req, 0, 'VENTA', v_venta_id);
+                    ELSE
+                        IF v_comp.stock_comp < v_cant_comp_req THEN
+                            RAISE EXCEPTION 'Stock insuficiente para el componente % del combo %: stock actual % unds, requerido % unds.',
+                                v_comp.nombre_comp, v_nombre_prod, v_comp.stock_comp, v_cant_comp_req;
+                        END IF;
+                        UPDATE inventario 
+                        SET stock = stock - v_cant_comp_req,
+                            piezas_sueltas = 0
+                        WHERE id = v_comp.componente_id;
+
+                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                        VALUES (v_comp.componente_id, 'SALIDA', 0, v_cant_comp_req, 'VENTA', v_venta_id);
+                    END IF;
+                END LOOP;
+            ELSE
+                IF v_m2_caja > 0 THEN
+                    DECLARE
+                        v_pzs_faltantes INT := 0;
+                        v_cajas_a_abrir INT := 0;
+                        v_pzs_totales_disp INT;
+                        v_pzs_totales_req INT;
+                    BEGIN
+                        v_pzs_totales_disp := (v_stock_actual * v_pzs_por_caja) + v_pzs_actual;
+                        v_pzs_totales_req := (v_cant_cajas * v_pzs_por_caja) + v_pzs_sueltas;
+
+                        IF v_pzs_totales_disp < v_pzs_totales_req THEN
+                            RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % cjs, % pzs. Requerido % cjs, % pzs.', 
+                                v_nombre_prod, v_producto_id, v_stock_actual, v_pzs_actual, v_cant_cajas, v_pzs_sueltas;
+                        END IF;
+
+                        IF v_pzs_actual < v_pzs_sueltas THEN
+                            v_pzs_faltantes := v_pzs_sueltas - v_pzs_actual;
+                            v_cajas_a_abrir := CEIL(v_pzs_faltantes::NUMERIC / v_pzs_por_caja::NUMERIC)::INT;
+                        END IF;
+
+                        UPDATE inventario 
+                        SET stock = stock - v_cant_cajas - v_cajas_a_abrir,
+                            piezas_sueltas = piezas_sueltas + (v_cajas_a_abrir * v_pzs_por_caja) - v_pzs_sueltas
+                        WHERE id = v_producto_id;
+
+                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                        VALUES (v_producto_id, 'SALIDA', v_cant_cajas + v_cajas_a_abrir, v_pzs_sueltas, 'VENTA', v_venta_id);
+                    END;
+                ELSE
+                    IF v_stock_actual < v_pzs_sueltas THEN
+                        RAISE EXCEPTION 'Stock insuficiente para % (%): stock actual % unidades. Requerido % unidades.', 
+                            v_nombre_prod, v_producto_id, v_stock_actual, v_pzs_sueltas;
+                    END IF;
+
+                    UPDATE inventario 
+                    SET stock = stock - v_pzs_sueltas,
+                        piezas_sueltas = 0
+                    WHERE id = v_producto_id;
+
+                    INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                    VALUES (v_producto_id, 'SALIDA', 0, v_pzs_sueltas, 'VENTA', v_venta_id);
+                END IF;
+            END IF;
+        END IF;
+
+        INSERT INTO ventas_detalle (venta_id, producto_id, cantidad_cajas, piezas_sueltas, precio_unitario, costo_unitario, subtotal)
+        VALUES (v_venta_id, v_producto_id, v_cant_cajas, v_pzs_sueltas, v_precio_unit, v_costo_unit, v_subtotal_item);
+
+    END LOOP;
+
+    RETURN v_codigo_venta;
+END;
+$$ LANGUAGE plpgsql;
+
+
+

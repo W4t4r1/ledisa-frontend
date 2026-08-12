@@ -4,6 +4,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import EmpresaSelector from './EmpresaSelector'
 
 export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false)
@@ -13,6 +14,7 @@ export default function Sidebar() {
     { href: '/admin/dashboard', label: '📊 Dashboard KPI' },
     { href: '/admin', label: '📦 Gestión de Inventario' },
     { href: '/admin/ventas', label: '⚡ Workspace de Ventas' },
+    { href: '/admin/cobranzas', label: '💰 Cuentas por Cobrar' },
     { href: '/admin/clientes', label: '👥 Gestión de Clientes (CRM)' },
     { href: '/admin/kardex', label: '📈 Kardex de Inventario' },
     { href: '/admin/compras', label: '🚚 Compras y Proveedores' },
@@ -28,6 +30,9 @@ export default function Sidebar() {
 
   const renderNavLinks = () => (
     <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+      <div className="mb-4">
+        <EmpresaSelector />
+      </div>
       {links.map((link) => (
         <Link
           key={link.href}
@@ -70,7 +75,6 @@ export default function Sidebar() {
       {/* HEADER SUPERIOR PARA MÓVILES */}
       <header className="md:hidden bg-[#04558C] text-white p-4 shadow-md flex justify-between items-center z-30 w-full">
         <div className="flex items-center gap-3">
-          {/* Botón Hamburguesa */}
           <button
             onClick={() => setIsOpen(true)}
             className="p-1 rounded hover:bg-[#033f6b] focus:outline-none transition-colors"
@@ -98,13 +102,11 @@ export default function Sidebar() {
       {/* SIDEBAR MÓVIL (CAJÓN DESLIZABLE) */}
       {isOpen && (
         <div className="fixed inset-0 z-50 md:hidden flex">
-          {/* Backdrop oscuro */}
           <div
             className="fixed inset-0 bg-black/60 transition-opacity"
             onClick={() => setIsOpen(false)}
           ></div>
 
-          {/* Menú deslizable */}
           <div className="relative flex-1 flex flex-col max-w-xs w-full bg-[#04558C] text-white shadow-2xl transition-transform duration-300 ease-in-out h-full">
             <div className="p-6 flex justify-between items-center border-b border-[#033f6b]">
               <div>

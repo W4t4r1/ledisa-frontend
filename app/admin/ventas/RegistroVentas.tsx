@@ -107,6 +107,12 @@ export default function RegistroVentas({
   const [estadoVenta, setEstadoVenta] = useState<any>('PAGADO')
   const [descuento, setDescuento] = useState(0)
   const [nota, setNota] = useState('')
+  const [modoCobro, setModoCobro] = useState<'CONTADO' | 'DESPACHO_CREDITO'>('CONTADO')
+  const [esPagoDividido, setEsPagoDividido] = useState(false)
+  const [pagosDivididos, setPagosDivididos] = useState<{ metodo_pago: string; monto: number; referencia: string }[]>([
+    { metodo_pago: 'Efectivo', monto: 0, referencia: '' },
+    { metodo_pago: 'Yape/Plin', monto: 0, referencia: '' }
+  ])
 
   // Estados para búsqueda predictiva de clientes
   const [clientesSugeridos, setClientesSugeridos] = useState<any[]>([])
@@ -646,14 +652,20 @@ export default function RegistroVentas({
         }
 
         // 2. Procesar la Venta asignando los costos reales de adquisición
+        const empresaIdActiva = typeof window !== 'undefined' ? localStorage.getItem('ledisa_empresa_activa_id') : null
+        const pagosFiltrados = esPagoDividido ? pagosDivididos.filter(p => Number(p.monto) > 0) : []
+
         const payload = {
           cliente_id: clienteSeleccionado ? clienteSeleccionado.id : null,
           subtotal: subtotalVenta,
           descuento: descuento,
           total: totalVenta,
-          metodo_pago: metodoPago,
-          estado: estadoVenta,
+          metodo_pago: esPagoDividido ? 'Pago Mixto' : metodoPago,
+          estado: modoCobro === 'DESPACHO_CREDITO' ? 'ENTREGADO' : estadoVenta,
           nota: nota.trim() || undefined,
+          empresa_id: empresaIdActiva || null,
+          estado_pago: (modoCobro === 'DESPACHO_CREDITO' ? 'PENDIENTE' : 'PAGADO') as 'PAGADO' | 'PENDIENTE' | 'PAGADO_PARCIAL',
+          pagos: esPagoDividido && pagosFiltrados.length > 0 ? pagosFiltrados : undefined,
           items: carrito.map(item => ({
             producto_id: item.producto.id,
             cantidad_cajas: item.cantidad_cajas,
@@ -1207,38 +1219,132 @@ export default function RegistroVentas({
 
             <div className="space-y-4">
               
-              {/* Método de pago */}
+              {/* Modo de Operación: Contado vs Despacho a Crédito */}
               <div>
-                <label className="text-xs font-bold text-gray-500 block mb-1">Método de Pago</label>
-                <select 
-                  value={metodoPago}
-                  onChange={e => setMetodoPago(e.target.value)}
-                  className="w-full border p-2.5 rounded bg-white text-gray-900 focus:outline-none"
-                >
-                  <option value="Efectivo">💵 Efectivo</option>
-                  <option value="Yape/Plin">📱 Yape/Plin</option>
-                  <option value="Transferencia BCP">🏦 Transferencia BCP</option>
-                  <option value="Transferencia Interbancaria">🏦 Transf. Interbancaria</option>
-                  <option value="Tarjeta Credito/Debito">💳 Tarjeta Crédito/Débito</option>
-                  <option value="Credito">🕒 Crédito Comercial</option>
-                  <option value="Sin Especificar">Otros</option>
-                </select>
+                <label className="text-xs font-bold text-gray-700 block mb-1 uppercase tracking-wider">
+                  Modalidad de Cobro
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModoCobro('CONTADO')
+                      if (estadoVenta === 'COTIZACION') setEstadoVenta('PAGADO')
+                    }}
+                    className={`p-2.5 rounded text-xs font-bold border transition-all ${
+                      modoCobro === 'CONTADO'
+                        ? 'bg-emerald-600 border-emerald-600 text-white shadow-md'
+                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    💵 Pago Contado
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModoCobro('DESPACHO_CREDITO')
+                      setEstadoVenta('ENTREGADO')
+                    }}
+                    className={`p-2.5 rounded text-xs font-bold border transition-all ${
+                      modoCobro === 'DESPACHO_CREDITO'
+                        ? 'bg-purple-700 border-purple-700 text-white shadow-md'
+                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    🚚 Despacho a Crédito (Cobro en Ruta)
+                  </button>
+                </div>
+                {modoCobro === 'DESPACHO_CREDITO' && (
+                  <p className="text-[11px] text-purple-700 font-semibold mt-1 bg-purple-50 p-2 rounded border border-purple-200">
+                    ℹ️ Descuenta inventario inmediatamente y registra la deuda en <strong>Cuentas por Cobrar</strong> para cobrar en la tarde.
+                  </p>
+                )}
               </div>
+
+              {/* Método de Pago o Pago Dividido (Solo si es Contado) */}
+              {modoCobro === 'CONTADO' && (
+                <div className="space-y-3 pt-1 border-t border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">Método de Pago</label>
+                    <label className="flex items-center gap-1.5 text-xs text-[#04558C] font-bold cursor-pointer hover:underline">
+                      <input
+                        type="checkbox"
+                        checked={esPagoDividido}
+                        onChange={(e) => setEsPagoDividido(e.target.checked)}
+                        className="rounded text-[#04558C] focus:ring-[#04558C]"
+                      />
+                      <span>🔄 Pago Dividido / Mixto</span>
+                    </label>
+                  </div>
+
+                  {!esPagoDividido ? (
+                    <select 
+                      value={metodoPago}
+                      onChange={e => setMetodoPago(e.target.value)}
+                      className="w-full border p-2.5 rounded bg-white text-gray-900 font-bold focus:outline-none focus:ring-2 focus:ring-[#04558C]"
+                    >
+                      <option value="Efectivo">💵 Efectivo (Caja Física)</option>
+                      <option value="Yape/Plin">📱 Yape / Plin</option>
+                      <option value="Transferencia BCP">🏦 Transferencia BCP</option>
+                      <option value="Transferencia Interbancaria">🏦 Transf. Interbancaria</option>
+                      <option value="Tarjeta Credito/Debito">💳 Tarjeta Crédito / Débito</option>
+                      <option value="Sin Especificar">Otros</option>
+                    </select>
+                  ) : (
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2 text-xs">
+                      <p className="font-bold text-slate-700">Desglose de Pago Dividido:</p>
+                      {pagosDivididos.map((pago, index) => (
+                        <div key={index} className="flex gap-2 items-center">
+                          <select
+                            value={pago.metodo_pago}
+                            onChange={(e) => {
+                              const copy = [...pagosDivididos]
+                              copy[index].metodo_pago = e.target.value
+                              setPagosDivididos(copy)
+                            }}
+                            className="w-1/2 border p-1.5 rounded bg-white text-slate-800 font-semibold"
+                          >
+                            <option value="Efectivo">💵 Efectivo</option>
+                            <option value="Yape/Plin">📱 Yape / Plin</option>
+                            <option value="Transferencia BCP">🏦 Transf. BCP</option>
+                            <option value="Tarjeta Credito/Debito">💳 Tarjeta</option>
+                          </select>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="Monto S/"
+                            value={pago.monto || ''}
+                            onChange={(e) => {
+                              const copy = [...pagosDivididos]
+                              copy[index].monto = parseFloat(e.target.value) || 0
+                              setPagosDivididos(copy)
+                            }}
+                            className="w-1/2 border p-1.5 rounded bg-white font-bold text-slate-900"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Estado de la venta */}
               <div>
-                <label className="text-xs font-bold text-gray-500 block mb-1">Tipo de Registro (Estado)</label>
+                <label className="text-xs font-bold text-gray-500 block mb-1">Tipo de Documento / Registro</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setEstadoVenta('PAGADO')}
-                    className={`p-2 rounded text-xs font-bold border transition-colors ${estadoVenta === 'PAGADO' ? 'bg-green-600 border-green-600 text-white shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                    className={`p-2 rounded text-xs font-bold border transition-colors ${estadoVenta === 'PAGADO' || estadoVenta === 'ENTREGADO' ? 'bg-green-600 border-green-600 text-white shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
                   >
                     🔴 COMPRA (Descuenta)
                   </button>
                   <button
                     type="button"
-                    onClick={() => setEstadoVenta('COTIZACION')}
+                    onClick={() => {
+                      setEstadoVenta('COTIZACION')
+                      setModoCobro('CONTADO')
+                    }}
                     className={`p-2 rounded text-xs font-bold border transition-colors ${estadoVenta === 'COTIZACION' ? 'bg-amber-500 border-amber-500 text-white shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
                   >
                     📝 COTIZACIÓN (No desc.)

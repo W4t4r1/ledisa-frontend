@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 
 export interface CajaSesion {
   id?: string
+  empresa_id?: string | null
   fecha_apertura?: string
   fecha_cierre?: string | null
   monto_apertura: number
@@ -35,13 +36,19 @@ export interface CajaChicaMovimiento {
 }
 
 /**
- * Obtiene la sesión de caja abierta actual (si existe).
+ * Obtiene la sesión de caja abierta actual para la empresa activa (si existe).
  */
-export async function getSesionCajaActiva(): Promise<CajaSesion | null> {
-  const { data, error } = await supabase
+export async function getSesionCajaActiva(empresaId?: string): Promise<CajaSesion | null> {
+  let query = supabase
     .from('cajas_sesiones')
     .select('*')
     .eq('estado', 'ABIERTA')
+
+  if (empresaId) {
+    query = query.or(`empresa_id.eq.${empresaId},empresa_id.is.null`)
+  }
+
+  const { data, error } = await query
     .order('fecha_apertura', { ascending: false })
     .maybeSingle()
 
@@ -55,9 +62,8 @@ export async function getSesionCajaActiva(): Promise<CajaSesion | null> {
 /**
  * Registra la apertura de una nueva sesión de caja (turno).
  */
-export async function abrirSesionCaja(montoApertura: number): Promise<CajaSesion> {
-  // Asegurar que no haya otra caja abierta antes de abrir una nueva
-  const activa = await getSesionCajaActiva()
+export async function abrirSesionCaja(montoApertura: number, empresaId?: string): Promise<CajaSesion> {
+  const activa = await getSesionCajaActiva(empresaId)
   if (activa) {
     throw new Error('Ya existe una sesión de caja abierta activa. Debes cerrarla primero.')
   }
@@ -66,6 +72,7 @@ export async function abrirSesionCaja(montoApertura: number): Promise<CajaSesion
     .from('cajas_sesiones')
     .insert({
       monto_apertura: montoApertura,
+      empresa_id: empresaId || null,
       estado: 'ABIERTA'
     })
     .select()
@@ -130,9 +137,16 @@ export async function getVentasSesionCaja(sesionId: string): Promise<any[]> {
       total,
       metodo_pago,
       estado,
+      estado_pago,
+      monto_pagado,
+      saldo_pendiente,
       fecha,
       clientes (
         nombre_razon_social
+      ),
+      venta_pagos (
+        metodo_pago,
+        monto
       )
     `)
     .eq('sesion_caja_id', sesionId)
@@ -146,6 +160,7 @@ export async function getVentasSesionCaja(sesionId: string): Promise<any[]> {
 
 /**
  * Realiza el cuadre final de caja (arqueo) y cierra el turno de caja.
+ * Soporta desgloses de pagos mixtos y abonos a crédito cobrados en el turno.
  */
 export async function ejecutarCierreCaja(
   sesionId: string,
@@ -155,7 +170,6 @@ export async function ejecutarCierreCaja(
   montoRealTarjeta: number,
   nota: string
 ): Promise<CajaSesion> {
-  // 1. Obtener la sesión activa para validar su estado y saldo inicial
   const { data: sesion, error: errSesion } = await supabase
     .from('cajas_sesiones')
     .select('*')
@@ -170,10 +184,20 @@ export async function ejecutarCierreCaja(
     throw new Error('Esta sesión de caja ya se encuentra cerrada.')
   }
 
-  // 2. Cargar todas las ventas confirmadas (PAGADO/ENTREGADO) vinculadas a este turno
+  // 1. Obtener ventas asociadas al turno
   const { data: ventas, error: errVentas } = await supabase
     .from('ventas')
-    .select('total, metodo_pago')
+    .select(`
+      id,
+      total,
+      metodo_pago,
+      monto_pagado,
+      estado_pago,
+      venta_pagos (
+        metodo_pago,
+        monto
+      )
+    `)
     .eq('sesion_caja_id', sesionId)
     .in('estado', ['PAGADO', 'ENTREGADO'])
 
@@ -181,7 +205,17 @@ export async function ejecutarCierreCaja(
     throw new Error(`Error al consolidar ventas del turno: ${errVentas.message}`)
   }
 
-  // 3. Cargar todos los movimientos de caja chica registrados
+  // 2. Obtener abonos recibidos durante este turno (cobranzas de crédito)
+  const { data: abonos, error: errAbonos } = await supabase
+    .from('venta_abonos')
+    .select('monto, metodo_pago')
+    .eq('sesion_caja_id', sesionId)
+
+  if (errAbonos && errAbonos.code !== 'PGRST116') {
+    console.warn('Nota: No se pudieron cargar abonos (o la tabla aún no existe):', errAbonos?.message)
+  }
+
+  // 3. Cargar movimientos de caja chica
   const { data: movimientos, error: errMov } = await supabase
     .from('caja_chica_movimientos')
     .select('tipo, monto, metodo_pago')
@@ -191,29 +225,37 @@ export async function ejecutarCierreCaja(
     throw new Error(`Error al consolidar movimientos de caja chica: ${errMov.message}`)
   }
 
-  // 4. Calcular consolidados de ventas por método de pago
   let vEfectivo = 0
   let vTarjeta = 0
   let vYape = 0
   let vTransferencia = 0
 
+  const sumarMetodo = (mPago: string, monto: number) => {
+    const m = (mPago || '').toLowerCase()
+    if (m.includes('efectivo')) vEfectivo += monto
+    else if (m.includes('yape') || m.includes('plin')) vYape += monto
+    else if (m.includes('tarjeta') || m.includes('credito') || m.includes('debito')) vTarjeta += monto
+    else vTransferencia += monto
+  }
+
+  // Procesar ventas y sus desgloses
   ventas?.forEach(v => {
-    const totalVal = Number(v.total)
-    const m = (v.metodo_pago || '').toLowerCase()
-    
-    if (m.includes('efectivo')) {
-      vEfectivo += totalVal
-    } else if (m.includes('yape') || m.includes('plin')) {
-      vYape += totalVal
-    } else if (m.includes('tarjeta') || m.includes('credito') || m.includes('debito')) {
-      vTarjeta += totalVal
+    if (v.venta_pagos && v.venta_pagos.length > 0) {
+      v.venta_pagos.forEach((vp: any) => {
+        sumarMetodo(vp.metodo_pago, Number(vp.monto))
+      })
     } else {
-      // Cualquier otro método se agrupa como transferencia
-      vTransferencia += totalVal
+      const montoEfectivoVenta = Number(v.monto_pagado) || Number(v.total)
+      sumarMetodo(v.metodo_pago || 'Efectivo', montoEfectivoVenta)
     }
   })
 
-  // 5. Calcular consolidados de caja chica por método de pago
+  // Procesar abonos de cobranza en la tarde
+  abonos?.forEach(a => {
+    sumarMetodo(a.metodo_pago || 'Efectivo', Number(a.monto))
+  })
+
+  // Procesar movimientos de caja chica
   let egresosCajaChica = 0
   let ingresosCajaChica = 0
   
@@ -227,14 +269,9 @@ export async function ejecutarCierreCaja(
     const met = (m.metodo_pago || 'Efectivo').toLowerCase()
     const tipo = m.tipo
 
-    // Totales globales para historial
-    if (tipo === 'EGRESO') {
-      egresosCajaChica += montoVal
-    } else {
-      ingresosCajaChica += montoVal
-    }
+    if (tipo === 'EGRESO') egresosCajaChica += montoVal
+    else ingresosCajaChica += montoVal
 
-    // Desglose por método
     if (met.includes('efectivo')) {
       if (tipo === 'EGRESO') egresosEfectivo += montoVal
       else ingresosEfectivo += montoVal
@@ -250,19 +287,17 @@ export async function ejecutarCierreCaja(
     }
   })
 
-  // 6. Montos Esperados por Método de Pago
+  // Totales esperados
   const efectivoEsperado = Number(sesion.monto_apertura) + vEfectivo + ingresosEfectivo - egresosEfectivo
   const yapeEsperado = vYape + ingresosYape - egresosYape
   const transferenciaEsperado = vTransferencia + ingresosTransferencia - egresosTransferencia
   const tarjetaEsperado = vTarjeta + ingresosTarjeta - egresosTarjeta
 
-  // Discrepancias
   const diferencia = montoRealEfectivo - efectivoEsperado
   const diferenciaYape = montoRealYape - yapeEsperado
   const diferenciaTransferencia = montoRealTransferencia - transferenciaEsperado
   const diferenciaTarjeta = montoRealTarjeta - tarjetaEsperado
 
-  // 7. Actualizar la sesión en base de datos
   const { data: sesionCerrada, error: errCierre } = await supabase
     .from('cajas_sesiones')
     .update({
@@ -297,14 +332,19 @@ export async function ejecutarCierreCaja(
 }
 
 /**
- * Obtiene el historial completo de cajas cerradas.
+ * Obtiene el historial completo de cajas cerradas por empresa.
  */
-export async function getHistorialSesionesCaja(): Promise<CajaSesion[]> {
-  const { data, error } = await supabase
+export async function getHistorialSesionesCaja(empresaId?: string): Promise<CajaSesion[]> {
+  let query = supabase
     .from('cajas_sesiones')
     .select('*')
     .eq('estado', 'CERRADA')
-    .order('fecha_apertura', { ascending: false })
+
+  if (empresaId) {
+    query = query.or(`empresa_id.eq.${empresaId},empresa_id.is.null`)
+  }
+
+  const { data, error } = await query.order('fecha_apertura', { ascending: false })
 
   if (error) {
     throw new Error(`Error al obtener historial de cajas: ${error.message}`)
