@@ -224,3 +224,22 @@ export async function getKardex(productoId?: string): Promise<any[]> {
 
   return data || []
 }
+
+/**
+ * Anula una venta registrada en el sistema.
+ * Revierte el stock al inventario, registra el movimiento de Kardex (ANULACION_VENTA)
+ * y actualiza el estado de la venta a ANULADO.
+ */
+export async function anularVenta(ventaId: string, motivo?: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('anular_venta', {
+    p_venta_id: ventaId,
+    p_motivo: motivo || null
+  })
+
+  if (error) {
+    throw new Error(`Error al anular la venta: ${error.message}`)
+  }
+
+  return Boolean(data)
+}
+

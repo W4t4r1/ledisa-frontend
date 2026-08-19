@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { obtenerDetalle } from './actions'
+import { useRouter } from 'next/navigation'
+import { obtenerDetalle, anularVentaExistente } from './actions'
 import ComprobantePrint from '../../components/ComprobantePrint'
 import GuiaDespachoPrint from '../../components/GuiaDespachoPrint'
 
@@ -32,6 +33,7 @@ export default function HistorialVentas({
   setCotizacionCargar: (cotizacion: any) => void
   setTabActiva: (tab: 'registrar' | 'historial' | 'calculadora') => void
 }) {
+  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [busqueda, setBusqueda] = useState('')
   const [ventaSeleccionada, setVentaSeleccionada] = useState<Venta | null>(null)
@@ -40,6 +42,31 @@ export default function HistorialVentas({
   // Estado para impresión
   const [ventaImprimir, setVentaImprimir] = useState<any | null>(null)
   const [ventaImprimirGuia, setVentaImprimirGuia] = useState<any | null>(null)
+
+  // Estado para anulación de ventas
+  const [ventaAnularModal, setVentaAnularModal] = useState<Venta | null>(null)
+  const [motivoAnulacion, setMotivoAnulacion] = useState('')
+  const [isAnulando, setIsAnulando] = useState(false)
+
+  const handleConfirmarAnulacion = async () => {
+    if (!ventaAnularModal) return
+    setIsAnulando(true)
+    try {
+      const res = await anularVentaExistente(ventaAnularModal.id, motivoAnulacion)
+      if (res.success) {
+        alert(`✅ La venta ${ventaAnularModal.codigo_venta} ha sido anulada con éxito.`)
+        setVentaAnularModal(null)
+        setMotivoAnulacion('')
+        router.refresh()
+      } else {
+        alert(`❌ Error al anular la venta: ${res.error}`)
+      }
+    } catch (err: any) {
+      alert(`❌ Error inesperado: ${err.message}`)
+    } finally {
+      setIsAnulando(false)
+    }
+  }
 
   // Filtrado en memoria
   const ventasFiltradas = ventasIniciales.filter(v => {
@@ -219,6 +246,19 @@ export default function HistorialVentas({
                           ⚡ Facturar
                         </button>
                       )}
+                      {v.estado !== 'ANULADO' && (
+                        <button 
+                          onClick={() => {
+                            setVentaAnularModal(v)
+                            setMotivoAnulacion('')
+                          }}
+                          className="text-red-700 hover:text-red-900 font-bold text-xs bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
+                          title="Anular esta venta y devolver stock al inventario"
+                        >
+                          ❌ Anular
+                        </button>
+                      )}
+
                     </div>
                   </td>
                 </tr>
@@ -373,6 +413,19 @@ export default function HistorialVentas({
             </div>
 
             <div className="flex justify-end gap-2 pt-4 mt-6 border-t">
+              {ventaSeleccionada.estado !== 'ANULADO' && (
+                <button
+                  onClick={() => {
+                    const v = ventaSeleccionada
+                    setVentaSeleccionada(null)
+                    setVentaAnularModal(v)
+                    setMotivoAnulacion('')
+                  }}
+                  className="bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-lg font-bold transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+                >
+                  ❌ Anular Venta
+                </button>
+              )}
               <button
                 onClick={() => handleImprimirVenta(ventaSeleccionada)}
                 className="bg-[#04558C] hover:bg-[#033f6b] text-white px-5 py-2.5 rounded-lg font-bold transition-colors cursor-pointer text-xs flex items-center gap-1.5"
@@ -386,6 +439,7 @@ export default function HistorialVentas({
                 ✕ Cerrar
               </button>
             </div>
+
 
           </div>
         </div>
@@ -404,6 +458,68 @@ export default function HistorialVentas({
           <GuiaDespachoPrint venta={ventaImprimirGuia} />
         </div>
       )}
+
+      {/* MODAL CONFIRMACIÓN ANULACIÓN */}
+      {ventaAnularModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-2xl">
+            <div className="flex justify-between items-center border-b pb-3 mb-4">
+              <h3 className="text-lg font-bold text-red-600 flex items-center gap-2">
+                <span>❌</span> Anular Venta
+              </h3>
+              <button 
+                onClick={() => setVentaAnularModal(null)}
+                disabled={isAnulando}
+                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-700 mb-2">
+              ¿Estás seguro de que deseas anular la venta <strong className="font-mono font-bold text-gray-900">{ventaAnularModal.codigo_venta}</strong> por el total de <strong className="text-blue-700">S/. {ventaAnularModal.total.toFixed(2)}</strong>?
+            </p>
+
+            {ventaAnularModal.estado !== 'COTIZACION' && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs p-3 rounded mb-4">
+                ⚠️ <strong>Nota:</strong> Al anular esta transacción, la mercadería asociada regresará automáticamente al inventario y se generará una entrada en el Kardex.
+              </div>
+            )}
+
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                Motivo o justificación de anulación (opcional):
+              </label>
+              <textarea
+                rows={2}
+                value={motivoAnulacion}
+                onChange={(e) => setMotivoAnulacion(e.target.value)}
+                placeholder="Ej: Cliente solicitó cancelación, error en digitación..."
+                className="w-full border border-gray-300 rounded p-2 text-xs focus:outline-none focus:border-red-500"
+                disabled={isAnulando}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <button
+                onClick={() => setVentaAnularModal(null)}
+                disabled={isAnulando}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmarAnulacion}
+                disabled={isAnulando}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                {isAnulando ? '⏳ Anulando...' : 'Confirmar Anulación'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

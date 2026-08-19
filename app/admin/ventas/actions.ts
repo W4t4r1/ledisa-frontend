@@ -116,3 +116,28 @@ export async function buscarClientes(query: string) {
     throw new Error(error.message)
   }
 }
+
+/**
+ * Anula una venta registrada, revirtiendo stock en inventario y generando entrada Kardex.
+ * Fuerza la revalidación del Dashboard, Ventas, Inventario, Caja y Cobranzas.
+ */
+export async function anularVentaExistente(ventaId: string, motivo?: string) {
+  try {
+    const { anularVenta } = await import('../../lib/ventas.service')
+    await anularVenta(ventaId, motivo)
+    try {
+      revalidatePath('/admin')
+      revalidatePath('/admin/dashboard')
+      revalidatePath('/admin/ventas')
+      revalidatePath('/admin/inventario')
+      revalidatePath('/admin/caja')
+      revalidatePath('/admin/cobranzas')
+    } catch (e) {
+      console.warn('Revalidation warning:', e)
+    }
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Error al anular la venta' }
+  }
+}
+
