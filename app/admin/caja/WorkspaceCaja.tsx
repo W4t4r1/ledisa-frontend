@@ -4,6 +4,7 @@
 import { useState, useTransition, useEffect } from 'react'
 import {
   abrirCaja,
+  guardarAjusteSaldoInicialBcp,
   guardarMovimientoCajaChica,
   cerrarTurnoCaja,
   obtenerMovimientosDeSesion,
@@ -424,9 +425,38 @@ export default function WorkspaceCaja({
                       <span className="text-gray-400 block text-[10px] uppercase font-bold">Fondo Efectivo</span>
                       <span className="font-bold text-emerald-700">S/. {efectivoApertura.toFixed(2)}</span>
                     </div>
-                    <div className="border-l pl-3">
-                      <span className="text-blue-700 block text-[10px] uppercase font-bold">Saldo Inicial BCP (Yape/Tarjeta)</span>
-                      <span className="font-black text-blue-900">S/. {bcpApertura.toFixed(2)}</span>
+                    <div className="border-l pl-3 flex items-center gap-3">
+                      <div>
+                        <span className="text-blue-700 block text-[10px] uppercase font-bold">Saldo Inicial BCP (Yape/Tarjeta)</span>
+                        <span className="font-black text-blue-900">S/. {bcpApertura.toFixed(2)}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nuevoSaldo = window.prompt(
+                            'Ingresa el saldo inicial correcto en tu cuenta BCP (Yape / Tarjeta):',
+                            bcpApertura ? String(bcpApertura) : ''
+                          )
+                          if (nuevoSaldo !== null) {
+                            const val = parseFloat(nuevoSaldo) || 0
+                            if (val >= 0 && sesionActiva?.id) {
+                              startTransition(async () => {
+                                try {
+                                  await guardarAjusteSaldoInicialBcp(sesionActiva.id!, val)
+                                  setSesionActiva({ ...sesionActiva, monto_apertura_yape: val })
+                                  alert('✅ Saldo inicial BCP actualizado a S/. ' + val.toFixed(2))
+                                } catch (e: any) {
+                                  alert('❌ Error: ' + e.message)
+                                }
+                              })
+                            }
+                          }
+                        }}
+                        className="text-[10px] font-bold text-blue-700 bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded transition-colors cursor-pointer"
+                        title="Modificar saldo inicial BCP"
+                      >
+                        ✏️ {bcpApertura === 0 ? 'Fijar Saldo' : 'Editar'}
+                      </button>
                     </div>
                   </div>
                 </div>

@@ -39,6 +39,24 @@ export interface CajaChicaMovimiento {
 }
 
 /**
+ * Normaliza los datos de la sesión extrayendo saldos iniciales digitales incluso si la tabla aún no tiene la columna.
+ */
+export function normalizarSesionCaja(data: any): CajaSesion {
+  if (!data) return data
+  let bcpApertura = Number(data.monto_apertura_yape || data.monto_apertura_tarjeta || 0)
+  if (bcpApertura === 0 && data.nota) {
+    const match = String(data.nota).match(/\[APERTURA_BCP:([\d.]+)\]/)
+    if (match && match[1]) {
+      bcpApertura = parseFloat(match[1]) || 0
+    }
+  }
+  return {
+    ...data,
+    monto_apertura_yape: bcpApertura
+  }
+}
+
+/**
  * Obtiene la sesión de caja abierta actual para la empresa activa (si existe).
  */
 export async function getSesionCajaActiva(empresaId?: string): Promise<CajaSesion | null> {
@@ -59,7 +77,7 @@ export async function getSesionCajaActiva(empresaId?: string): Promise<CajaSesio
     throw new Error(`Error al buscar sesión de caja activa: ${error.message}`)
   }
 
-  return data
+  return data ? normalizarSesionCaja(data) : null
 }
 
 /**
@@ -77,13 +95,16 @@ export async function abrirSesionCaja(
     throw new Error('Ya existe una sesión de caja abierta activa. Debes cerrarla primero.')
   }
 
+  const notaTag = montoAperturaYape > 0 ? `[APERTURA_BCP:${montoAperturaYape}]` : null
+
   const payload: any = {
     monto_apertura: montoAperturaEfectivo,
     monto_apertura_yape: montoAperturaYape,
     monto_apertura_tarjeta: montoAperturaTarjeta,
     monto_apertura_transferencia: montoAperturaTransferencia,
     empresa_id: empresaId || null,
-    estado: 'ABIERTA'
+    estado: 'ABIERTA',
+    nota: notaTag
   }
 
   const { data, error } = await supabase
@@ -93,12 +114,13 @@ export async function abrirSesionCaja(
     .single()
 
   if (error) {
-    // Si las columnas nuevas aún no existen en Supabase, hacer fallback guardando monto_apertura
+    // Si las columnas nuevas aún no existen en Supabase, guardar como fallback en nota
     if (error.message.includes('column') || error.message.includes('monto_apertura_yape')) {
       const fallbackPayload = {
         monto_apertura: montoAperturaEfectivo,
         empresa_id: empresaId || null,
-        estado: 'ABIERTA'
+        estado: 'ABIERTA',
+        nota: notaTag
       }
       const { data: dataFallback, error: errFallback } = await supabase
         .from('cajas_sesiones')
@@ -109,12 +131,49 @@ export async function abrirSesionCaja(
       if (errFallback) {
         throw new Error(`Error al abrir turno de caja: ${errFallback.message}`)
       }
-      return dataFallback
+      return normalizarSesionCaja(dataFallback)
     }
     throw new Error(`Error al abrir turno de caja: ${error.message}`)
   }
 
-  return data
+  return normalizarSesionCaja(data)
+}
+
+/**
+ * Permite ajustar o actualizar el saldo inicial BCP de un turno activo.
+ */
+export async function actualizarSaldoInicialBcp(sesionId: string, montoBcp: number): Promise<void> {
+  const { data: sesion } = await supabase
+    .from('cajas_sesiones')
+    .select('nota')
+    .eq('id', sesionId)
+    .single()
+
+  const notaActual = sesion?.nota || ''
+  let nuevaNota = notaActual
+  if (nuevaNota.includes('[APERTURA_BCP:')) {
+    nuevaNota = nuevaNota.replace(/\[APERTURA_BCP:[\d.]+\]/, `[APERTURA_BCP:${montoBcp}]`)
+  } else {
+    nuevaNota = `${nuevaNota} [APERTURA_BCP:${montoBcp}]`.trim()
+  }
+
+  // Intentar actualizar columna si existe, o en la nota
+  const { error } = await supabase
+    .from('cajas_sesiones')
+    .update({
+      monto_apertura_yape: montoBcp,
+      nota: nuevaNota
+    })
+    .eq('id', sesionId)
+
+  if (error && error.message.includes('column')) {
+    await supabase
+      .from('cajas_sesiones')
+      .update({
+        nota: nuevaNota
+      })
+      .eq('id', sesionId)
+  }
 }
 
 /**
@@ -387,5 +446,5 @@ export async function getHistorialSesionesCaja(empresaId?: string): Promise<Caja
     throw new Error(`Error al obtener historial de cajas: ${error.message}`)
   }
 
-  return data || []
+  return (data || []).map(normalizarSesionCaja)
 }

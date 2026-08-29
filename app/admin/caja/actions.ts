@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import {
   getSesionCajaActiva,
   abrirSesionCaja,
+  actualizarSaldoInicialBcp,
   crearMovimientoCajaChica,
   getMovimientosSesion,
   getVentasSesionCaja,
@@ -18,6 +19,18 @@ import {
 export async function obtenerSesionCajaActiva() {
   try {
     return await getSesionCajaActiva()
+  } catch (error: any) {
+    throw new Error(error.message)
+  }
+}
+
+/**
+ * Ajusta el saldo inicial BCP de una sesión abierta.
+ */
+export async function guardarAjusteSaldoInicialBcp(sesionId: string, montoBcp: number) {
+  try {
+    await actualizarSaldoInicialBcp(sesionId, montoBcp)
+    revalidatePath('/admin/caja')
   } catch (error: any) {
     throw new Error(error.message)
   }
