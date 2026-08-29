@@ -153,7 +153,21 @@ export async function registrarAbono(
     throw new Error(`Error al registrar el abono: ${error.message}`)
   }
 
-  return Number(data)
+  const nuevoSaldo = Number(data)
+
+  // Si la deuda quedó saldada (saldo <= 0), marcar la venta como CANCELADO / PAGADO
+  if (nuevoSaldo <= 0.01) {
+    await supabase
+      .from('ventas')
+      .update({
+        estado: 'PAGADO',
+        estado_pago: 'PAGADO',
+        saldo_pendiente: 0.00
+      })
+      .eq('id', ventaId)
+  }
+
+  return nuevoSaldo
 }
 
 /**

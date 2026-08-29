@@ -68,6 +68,19 @@ export default function ComprobantePrint({ venta }: ComprobantePrintProps) {
             {esCotizacion ? 'PROFORMA / COTIZACIÓN' : 'NOTA DE VENTA'}
           </h2>
           <p className="text-sm font-black font-mono text-[#04558C] print:text-black">N° {venta.codigo_venta}</p>
+          {!esCotizacion && (
+            <div className="mt-1.5">
+              {(venta.estado === 'PAGADO' || (venta as any).estado_pago === 'PAGADO' || Number((venta as any).saldo_pendiente || 0) <= 0.01) ? (
+                <span className="text-[10px] font-black uppercase text-emerald-800 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded tracking-wider">
+                  ✓ CANCELADO
+                </span>
+              ) : (
+                <span className="text-[10px] font-black uppercase text-blue-800 bg-blue-50 border border-blue-300 px-2 py-0.5 rounded tracking-wider">
+                  DESPACHO A CRÉDITO
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

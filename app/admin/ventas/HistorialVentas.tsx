@@ -127,19 +127,27 @@ export default function HistorialVentas({
   }
 
   // Helper para pintar badges de estado
-  const getBadgeEstado = (estado: string) => {
-    switch (estado) {
-      case 'PAGADO':
-        return <span className="bg-green-100 text-green-800 text-xs font-bold px-2.5 py-1 rounded border border-green-200">🟢 PAGADO</span>
-      case 'ENTREGADO':
-        return <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-1 rounded border border-blue-200">🔵 ENTREGADO</span>
-      case 'COTIZACION':
-        return <span className="bg-amber-100 text-amber-800 text-xs font-bold px-2.5 py-1 rounded border border-amber-200">📝 COTIZACIÓN</span>
-      case 'ANULADO':
-        return <span className="bg-red-100 text-red-800 text-xs font-bold px-2.5 py-1 rounded border border-red-200">❌ ANULADO</span>
-      default:
-        return <span className="bg-gray-100 text-gray-800 text-xs font-bold px-2.5 py-1 rounded">{estado}</span>
+  const getBadgeEstado = (v: any) => {
+    const estado = v.estado
+    const estadoPago = v.estado_pago
+    const saldo = Number(v.saldo_pendiente ?? (estadoPago === 'PAGADO' ? 0 : v.total))
+
+    if (estado === 'ANULADO') {
+      return <span className="bg-red-100 text-red-800 text-xs font-bold px-2.5 py-1 rounded border border-red-200">❌ ANULADO</span>
     }
+    if (estado === 'COTIZACION') {
+      return <span className="bg-amber-100 text-amber-800 text-xs font-bold px-2.5 py-1 rounded border border-amber-200">📝 COTIZACIÓN</span>
+    }
+    if (estado === 'PAGADO' || estadoPago === 'PAGADO' || saldo <= 0.01) {
+      return <span className="bg-green-100 text-green-800 text-xs font-bold px-2.5 py-1 rounded border border-green-200">🟢 CANCELADO</span>
+    }
+    if (estado === 'ENTREGADO') {
+      if (estadoPago === 'PAGADO_PARCIAL') {
+        return <span className="bg-amber-100 text-amber-800 text-xs font-bold px-2.5 py-1 rounded border border-amber-300">🟠 PAGO PARCIAL</span>
+      }
+      return <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-1 rounded border border-blue-200">🔵 ENTREGADO (POR COBRAR)</span>
+    }
+    return <span className="bg-gray-100 text-gray-800 text-xs font-bold px-2.5 py-1 rounded">{estado}</span>
   }
 
   return (
@@ -200,7 +208,7 @@ export default function HistorialVentas({
                     )}
                   </td>
                   <td className="p-3 text-gray-600 font-medium">{v.metodo_pago}</td>
-                  <td className="p-3 text-center">{getBadgeEstado(v.estado)}</td>
+                  <td className="p-3 text-center">{getBadgeEstado(v)}</td>
                   <td className="p-3 text-right font-bold text-[#04558C]">S/. {v.total.toFixed(2)}</td>
                   <td className="p-3 text-center">
                     <div className="flex items-center justify-center gap-1.5">
@@ -304,7 +312,7 @@ export default function HistorialVentas({
                 <p className="text-gray-500 font-medium">Pago y Registro:</p>
                 <p className="font-bold text-gray-800">Medio: {ventaSeleccionada.metodo_pago}</p>
                 <div className="mt-1 md:justify-end flex">
-                  {getBadgeEstado(ventaSeleccionada.estado)}
+                  {getBadgeEstado(ventaSeleccionada)}
                 </div>
               </div>
             </div>
