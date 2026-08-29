@@ -24,11 +24,21 @@ export async function obtenerSesionCajaActiva() {
 }
 
 /**
- * Abre el turno de caja chica.
+ * Abre el turno de caja chica con saldos iniciales.
  */
-export async function abrirCaja(montoApertura: number) {
+export async function abrirCaja(
+  montoAperturaEfectivo: number,
+  montoAperturaYape: number = 0,
+  montoAperturaTarjeta: number = 0,
+  montoAperturaTransferencia: number = 0
+) {
   try {
-    const res = await abrirSesionCaja(montoApertura)
+    const res = await abrirSesionCaja(
+      montoAperturaEfectivo,
+      montoAperturaYape,
+      montoAperturaTarjeta,
+      montoAperturaTransferencia
+    )
     revalidatePath('/admin/caja')
     revalidatePath('/admin/ventas') // Para que los vendedores detecten la caja abierta
     return res

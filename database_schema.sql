@@ -1401,6 +1401,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- ==========================================
+-- MIGRACIÓN: Saldos iniciales de Yape, Tarjeta y Transferencia en Cajas Sesiones
+-- ==========================================
+ALTER TABLE cajas_sesiones 
+ADD COLUMN IF NOT EXISTS monto_apertura_yape NUMERIC(12, 2) DEFAULT 0.00,
+ADD COLUMN IF NOT EXISTS monto_apertura_tarjeta NUMERIC(12, 2) DEFAULT 0.00,
+ADD COLUMN IF NOT EXISTS monto_apertura_transferencia NUMERIC(12, 2) DEFAULT 0.00;
+
+
 
 
 

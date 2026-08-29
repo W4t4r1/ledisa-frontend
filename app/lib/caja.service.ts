@@ -5,7 +5,10 @@ export interface CajaSesion {
   empresa_id?: string | null
   fecha_apertura?: string
   fecha_cierre?: string | null
-  monto_apertura: number
+  monto_apertura: number // Fondo inicial en efectivo
+  monto_apertura_yape?: number // Saldo inicial Yape
+  monto_apertura_tarjeta?: number // Saldo inicial Tarjeta BCP / POS
+  monto_apertura_transferencia?: number // Saldo inicial Transferencias
   monto_cierre_efectivo_calculado?: number
   monto_cierre_efectivo_real?: number
   diferencia?: number
@@ -60,25 +63,54 @@ export async function getSesionCajaActiva(empresaId?: string): Promise<CajaSesio
 }
 
 /**
- * Registra la apertura de una nueva sesión de caja (turno).
+ * Registra la apertura de una nueva sesión de caja (turno) con saldos iniciales de Efectivo, Yape y Tarjeta BCP.
  */
-export async function abrirSesionCaja(montoApertura: number, empresaId?: string): Promise<CajaSesion> {
+export async function abrirSesionCaja(
+  montoAperturaEfectivo: number,
+  montoAperturaYape: number = 0,
+  montoAperturaTarjeta: number = 0,
+  montoAperturaTransferencia: number = 0,
+  empresaId?: string
+): Promise<CajaSesion> {
   const activa = await getSesionCajaActiva(empresaId)
   if (activa) {
     throw new Error('Ya existe una sesión de caja abierta activa. Debes cerrarla primero.')
   }
 
+  const payload: any = {
+    monto_apertura: montoAperturaEfectivo,
+    monto_apertura_yape: montoAperturaYape,
+    monto_apertura_tarjeta: montoAperturaTarjeta,
+    monto_apertura_transferencia: montoAperturaTransferencia,
+    empresa_id: empresaId || null,
+    estado: 'ABIERTA'
+  }
+
   const { data, error } = await supabase
     .from('cajas_sesiones')
-    .insert({
-      monto_apertura: montoApertura,
-      empresa_id: empresaId || null,
-      estado: 'ABIERTA'
-    })
+    .insert(payload)
     .select()
     .single()
 
   if (error) {
+    // Si las columnas nuevas aún no existen en Supabase, hacer fallback guardando monto_apertura
+    if (error.message.includes('column') || error.message.includes('monto_apertura_yape')) {
+      const fallbackPayload = {
+        monto_apertura: montoAperturaEfectivo,
+        empresa_id: empresaId || null,
+        estado: 'ABIERTA'
+      }
+      const { data: dataFallback, error: errFallback } = await supabase
+        .from('cajas_sesiones')
+        .insert(fallbackPayload)
+        .select()
+        .single()
+
+      if (errFallback) {
+        throw new Error(`Error al abrir turno de caja: ${errFallback.message}`)
+      }
+      return dataFallback
+    }
     throw new Error(`Error al abrir turno de caja: ${error.message}`)
   }
 
@@ -287,11 +319,16 @@ export async function ejecutarCierreCaja(
     }
   })
 
-  // Totales esperados
-  const efectivoEsperado = Number(sesion.monto_apertura) + vEfectivo + ingresosEfectivo - egresosEfectivo
-  const yapeEsperado = vYape + ingresosYape - egresosYape
-  const transferenciaEsperado = vTransferencia + ingresosTransferencia - egresosTransferencia
-  const tarjetaEsperado = vTarjeta + ingresosTarjeta - egresosTarjeta
+  // Totales esperados considerando saldos de apertura
+  const efectivoApertura = Number(sesion.monto_apertura || 0)
+  const yapeApertura = Number(sesion.monto_apertura_yape || 0)
+  const tarjetaApertura = Number(sesion.monto_apertura_tarjeta || 0)
+  const transferenciaApertura = Number(sesion.monto_apertura_transferencia || 0)
+
+  const efectivoEsperado = efectivoApertura + vEfectivo + ingresosEfectivo - egresosEfectivo
+  const yapeEsperado = yapeApertura + vYape + ingresosYape - egresosYape
+  const transferenciaEsperado = transferenciaApertura + vTransferencia + ingresosTransferencia - egresosTransferencia
+  const tarjetaEsperado = tarjetaApertura + vTarjeta + ingresosTarjeta - egresosTarjeta
 
   const diferencia = montoRealEfectivo - efectivoEsperado
   const diferenciaYape = montoRealYape - yapeEsperado
