@@ -41,10 +41,9 @@ export default function WorkspaceCaja({
     setHistorialCierres(historialCierresInicial)
   }, [sesionActivaInicial, movimientosIniciales, ventasIniciales, historialCierresInicial])
 
-  // --- FORMULARIO APERTURA CON SALDOS INICIALES ---
+  // --- FORMULARIO APERTURA (EFECTIVO Y CUENTA BCP VINCULADA) ---
   const [montoAperturaEfectivo, setMontoAperturaEfectivo] = useState<number>(200)
-  const [montoAperturaYape, setMontoAperturaYape] = useState<number>(0)
-  const [montoAperturaTarjeta, setMontoAperturaTarjeta] = useState<number>(0)
+  const [montoAperturaBcp, setMontoAperturaBcp] = useState<number>(0) // Saldo único en la cuenta BCP (Yape / Tarjeta BCP)
   const [montoAperturaTransferencia, setMontoAperturaTransferencia] = useState<number>(0)
 
   // Formulario Movimiento Caja Chica
@@ -55,9 +54,8 @@ export default function WorkspaceCaja({
 
   // Formulario Cierre
   const [montoRealContado, setMontoRealContado] = useState<number>(0)
-  const [montoRealYape, setMontoRealYape] = useState<number>(0)
+  const [montoRealBcp, setMontoRealBcp] = useState<number>(0) // Saldo real que ves en App BCP / Yape
   const [montoRealTransferencia, setMontoRealTransferencia] = useState<number>(0)
-  const [montoRealTarjeta, setMontoRealTarjeta] = useState<number>(0)
   const [notaCierre, setNotaCierre] = useState('')
 
   // Auditoría Histórica (Modal)
@@ -110,10 +108,9 @@ export default function WorkspaceCaja({
     }
   })
 
-  // Movimientos de caja chica consolidados por método de pago
+  // Movimientos de caja chica consolidados por canal
   let egresosEfectivo = 0, ingresosEfectivo = 0
-  let egresosYape = 0, ingresosYape = 0
-  let egresosTarjeta = 0, ingresosTarjeta = 0
+  let egresosBcp = 0, ingresosBcp = 0
   let egresosTransferencia = 0, ingresosTransferencia = 0
   let egresosCajaChica = 0
   let ingresosCajaChica = 0
@@ -132,59 +129,49 @@ export default function WorkspaceCaja({
     if (met.includes('efectivo')) {
       if (tipo === 'EGRESO') egresosEfectivo += montoVal
       else ingresosEfectivo += montoVal
-    } else if (met.includes('yape') || met.includes('plin')) {
-      if (tipo === 'EGRESO') egresosYape += montoVal
-      else ingresosYape += montoVal
-    } else if (met.includes('tarjeta') || met.includes('credito') || met.includes('debito')) {
-      if (tipo === 'EGRESO') egresosTarjeta += montoVal
-      else ingresosTarjeta += montoVal
+    } else if (met.includes('yape') || met.includes('plin') || met.includes('tarjeta') || met.includes('bcp')) {
+      if (tipo === 'EGRESO') egresosBcp += montoVal
+      else ingresosBcp += montoVal
     } else {
       if (tipo === 'EGRESO') egresosTransferencia += montoVal
       else ingresosTransferencia += montoVal
     }
   })
 
-  // Montos Esperados tomando en cuenta saldos iniciales de Apertura
+  // Fondos Iniciales de Apertura
   const efectivoApertura = Number(sesionActiva?.monto_apertura || 0)
-  const yapeApertura = Number(sesionActiva?.monto_apertura_yape || 0)
-  const tarjetaApertura = Number(sesionActiva?.monto_apertura_tarjeta || 0)
+  // El saldo inicial BCP se toma de monto_apertura_yape o la suma de yape/tarjeta
+  const bcpApertura = Number(sesionActiva?.monto_apertura_yape || sesionActiva?.monto_apertura_tarjeta || 0)
   const transferenciaApertura = Number(sesionActiva?.monto_apertura_transferencia || 0)
 
+  // Montos Estimados Esperados
   const efectivoEstimado = efectivoApertura + ventasEfectivo + ingresosEfectivo - egresosEfectivo
-  const yapeEstimado = yapeApertura + ventasYape + ingresosYape - egresosYape
-  const tarjetaEstimado = tarjetaApertura + ventasTarjeta + ingresosTarjeta - egresosTarjeta
+  // Todo ingreso por Yape + Tarjeta BCP alimenta la misma cuenta bancaria BCP
+  const ventasTotalesBcp = ventasYape + ventasTarjeta
+  const bcpEstimado = bcpApertura + ventasTotalesBcp + ingresosBcp - egresosBcp
   const transferenciaEstimado = transferenciaApertura + ventasTransferencia + ingresosTransferencia - egresosTransferencia
 
-  // Totales BCP (Cuenta Vinculada: Yape + Tarjeta BCP)
-  const totalAperturaBcp = yapeApertura + tarjetaApertura
-  const totalVentasBcp = ventasYape + ventasTarjeta
-  const totalEstimadoBcp = yapeEstimado + tarjetaEstimado
-  const totalRealBcp = montoRealYape + montoRealTarjeta
-  const diferenciaBcp = totalRealBcp - totalEstimadoBcp
-
-  // Diferencias individuales
+  // Diferencias de Cuadre
   const diffEfectivo = montoRealContado - efectivoEstimado
-  const diffYape = montoRealYape - yapeEstimado
-  const diffTarjeta = montoRealTarjeta - tarjetaEstimado
+  const diffBcp = montoRealBcp - bcpEstimado
   const diffTransferencia = montoRealTransferencia - transferenciaEstimado
-  const descuadreTotal = diffEfectivo + diffYape + diffTarjeta + diffTransferencia
+  const descuadreTotal = diffEfectivo + diffBcp + diffTransferencia
 
-  // Inicializar los inputs de arqueo con los montos calculados por defecto
+  // Inicializar los inputs de arqueo con los montos calculados por defecto al cargar
   useEffect(() => {
     if (sesionActiva) {
       setMontoRealContado(parseFloat(efectivoEstimado.toFixed(2)))
-      setMontoRealYape(parseFloat(yapeEstimado.toFixed(2)))
+      setMontoRealBcp(parseFloat(bcpEstimado.toFixed(2)))
       setMontoRealTransferencia(parseFloat(transferenciaEstimado.toFixed(2)))
-      setMontoRealTarjeta(parseFloat(tarjetaEstimado.toFixed(2)))
     }
-  }, [sesionActiva, efectivoEstimado, yapeEstimado, transferenciaEstimado, tarjetaEstimado])
+  }, [sesionActiva, efectivoEstimado, bcpEstimado, transferenciaEstimado])
 
   // --- DISPARADORES ---
 
   // Abrir Turno con Saldos Iniciales
   const handleAbrirCaja = (e: React.FormEvent) => {
     e.preventDefault()
-    if (montoAperturaEfectivo < 0 || montoAperturaYape < 0 || montoAperturaTarjeta < 0 || montoAperturaTransferencia < 0) {
+    if (montoAperturaEfectivo < 0 || montoAperturaBcp < 0 || montoAperturaTransferencia < 0) {
       alert('Los montos de apertura no pueden ser negativos.')
       return
     }
@@ -193,8 +180,8 @@ export default function WorkspaceCaja({
       try {
         const res = await abrirCaja(
           montoAperturaEfectivo,
-          montoAperturaYape,
-          montoAperturaTarjeta,
+          montoAperturaBcp, // Guardado como saldo digital BCP
+          0,
           montoAperturaTransferencia
         )
         setSesionActiva(res)
@@ -243,7 +230,7 @@ export default function WorkspaceCaja({
   const handleCerrarCaja = () => {
     if (!sesionActiva?.id) return
 
-    const hayDescuadre = diffEfectivo !== 0 || diffYape !== 0 || diffTarjeta !== 0 || diffTransferencia !== 0
+    const hayDescuadre = diffEfectivo !== 0 || diffBcp !== 0 || diffTransferencia !== 0
 
     if (hayDescuadre && !notaCierre.trim()) {
       alert('⚠️ Existe un descuadre en la caja. Por favor escribe una Nota del Cierre o Novedades antes de finalizar.')
@@ -252,14 +239,10 @@ export default function WorkspaceCaja({
 
     const confirmacion = window.confirm(
       `⚠️ ¿Estás seguro de cerrar el turno de caja?\n\n` +
-      `[EFECTIVO]\n` +
+      `[EFECTIVO FÍSICO]\n` +
       `Inicial: S/. ${efectivoApertura.toFixed(2)} | Esperado: S/. ${efectivoEstimado.toFixed(2)} | Real: S/. ${montoRealContado.toFixed(2)} | Dif: S/. ${diffEfectivo.toFixed(2)}\n\n` +
-      `[YAPE/PLIN]\n` +
-      `Inicial: S/. ${yapeApertura.toFixed(2)} | Esperado: S/. ${yapeEstimado.toFixed(2)} | Real: S/. ${montoRealYape.toFixed(2)} | Dif: S/. ${diffYape.toFixed(2)}\n\n` +
-      `[TARJETA BCP / POS]\n` +
-      `Inicial: S/. ${tarjetaApertura.toFixed(2)} | Esperado: S/. ${tarjetaEstimado.toFixed(2)} | Real: S/. ${montoRealTarjeta.toFixed(2)} | Dif: S/. ${diffTarjeta.toFixed(2)}\n\n` +
-      `[BANCO BCP CONSOLIDADO]\n` +
-      `Inicial Total: S/. ${totalAperturaBcp.toFixed(2)} | Esperado BCP: S/. ${totalEstimadoBcp.toFixed(2)} | Real BCP: S/. ${totalRealBcp.toFixed(2)} | Dif BCP: S/. ${diferenciaBcp.toFixed(2)}\n\n` +
+      `[CUENTA BCP (YAPE + TARJETA)]\n` +
+      `Inicial: S/. ${bcpApertura.toFixed(2)} | Esperado: S/. ${bcpEstimado.toFixed(2)} | Real: S/. ${montoRealBcp.toFixed(2)} | Dif: S/. ${diffBcp.toFixed(2)}\n\n` +
       `Esta acción finalizará el turno y guardará el arqueo definitivo.`
     )
 
@@ -270,9 +253,9 @@ export default function WorkspaceCaja({
         const resCierre = await cerrarTurnoCaja(
           sesionActiva.id!,
           montoRealContado,
-          montoRealYape,
+          montoRealBcp, // Registrado como monto real BCP / Yape
           montoRealTransferencia,
-          montoRealTarjeta,
+          0,
           notaCierre
         )
         setTicketData(resCierre)
@@ -345,7 +328,7 @@ export default function WorkspaceCaja({
           <div>
             {!sesionActiva ? (
               
-              /* ESTADO: CAJA CERRADA (FORMULARIO APERTURA MULTIMÉTODO) */
+              /* ESTADO: CAJA CERRADA (FORMULARIO APERTURA SIMPLIFICADO) */
               <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-lg border border-gray-200 p-8 text-center space-y-6 mt-6">
                 <div className="flex justify-center items-center gap-3">
                   <span className="text-4xl">💵</span>
@@ -355,13 +338,14 @@ export default function WorkspaceCaja({
                 <div>
                   <h3 className="text-2xl font-black text-gray-800">Apertura de Turno de Caja</h3>
                   <p className="text-gray-500 text-xs mt-1">
-                    Ingresa los saldos iniciales del día para Efectivo, Yape y Tarjeta BCP (cuentas vinculadas).
+                    Ingresa con cuánto dinero físico y saldo bancario en BCP (Yape / Tarjeta) se inicia el turno.
                   </p>
                 </div>
 
                 <form onSubmit={handleAbrirCaja} className="space-y-4 text-left">
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    
                     {/* Efectivo Inicial */}
                     <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-100">
                       <label className="text-xs font-bold text-emerald-800 block mb-1">
@@ -376,65 +360,34 @@ export default function WorkspaceCaja({
                         onChange={e => setMontoAperturaEfectivo(parseFloat(e.target.value) || 0)}
                         className="w-full border border-emerald-300 p-2.5 rounded-lg text-gray-900 bg-white font-bold text-lg text-center focus:outline-none focus:border-emerald-600"
                       />
-                      <span className="text-[10px] text-gray-400 mt-1 block">Dinero en caja chica / sencillo</span>
+                      <span className="text-[10px] text-gray-400 mt-1 block">Dinero físico en caja / sencillo</span>
                     </div>
 
-                    {/* Saldo Inicial Yape */}
-                    <div className="bg-purple-50/60 p-4 rounded-xl border border-purple-100">
-                      <label className="text-xs font-bold text-purple-800 block mb-1">
-                        📱 Saldo Inicial Yape (S/.)*
+                    {/* Saldo Inicial Cuenta BCP (Yape / Tarjeta vinculada) */}
+                    <div className="bg-blue-50/70 p-4 rounded-xl border border-blue-200">
+                      <label className="text-xs font-bold text-blue-900 block mb-1">
+                        📱💳 Saldo Inicial BCP / Yape (S/.)*
                       </label>
                       <input 
                         type="number" 
                         step="0.01"
                         required
                         min="0"
-                        value={montoAperturaYape}
-                        onChange={e => setMontoAperturaYape(parseFloat(e.target.value) || 0)}
-                        className="w-full border border-purple-300 p-2.5 rounded-lg text-gray-900 bg-white font-bold text-lg text-center focus:outline-none focus:border-purple-600"
-                      />
-                      <span className="text-[10px] text-gray-400 mt-1 block">Saldo inicial en App Yape / BCP</span>
-                    </div>
-
-                    {/* Saldo Inicial Tarjeta BCP */}
-                    <div className="bg-amber-50/60 p-4 rounded-xl border border-amber-100">
-                      <label className="text-xs font-bold text-amber-800 block mb-1">
-                        💳 Saldo Inicial Tarjeta BCP / POS (S/.)*
-                      </label>
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        required
-                        min="0"
-                        value={montoAperturaTarjeta}
-                        onChange={e => setMontoAperturaTarjeta(parseFloat(e.target.value) || 0)}
-                        className="w-full border border-amber-300 p-2.5 rounded-lg text-gray-900 bg-white font-bold text-lg text-center focus:outline-none focus:border-amber-600"
-                      />
-                      <span className="text-[10px] text-gray-400 mt-1 block">Vínculo cuenta BCP / POS</span>
-                    </div>
-
-                    {/* Saldo Inicial Transferencias */}
-                    <div className="bg-blue-50/60 p-4 rounded-xl border border-blue-100">
-                      <label className="text-xs font-bold text-blue-800 block mb-1">
-                        🏦 Saldo Inicial Transferencias (S/.)*
-                      </label>
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        required
-                        min="0"
-                        value={montoAperturaTransferencia}
-                        onChange={e => setMontoAperturaTransferencia(parseFloat(e.target.value) || 0)}
+                        value={montoAperturaBcp}
+                        onChange={e => setMontoAperturaBcp(parseFloat(e.target.value) || 0)}
                         className="w-full border border-blue-300 p-2.5 rounded-lg text-gray-900 bg-white font-bold text-lg text-center focus:outline-none focus:border-blue-600"
                       />
-                      <span className="text-[10px] text-gray-400 mt-1 block">Otras cuentas bancarias</span>
+                      <span className="text-[10px] text-blue-600 font-semibold mt-1 block">
+                        Saldo inicial en App Yape / BCP vinculado
+                      </span>
                     </div>
+
                   </div>
 
-                  <div className="bg-blue-50/80 p-3 rounded-lg border border-blue-200 text-xs text-blue-900 font-semibold flex items-center gap-2">
+                  <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs text-amber-900 font-medium flex items-center gap-2">
                     <span>💡</span>
                     <span>
-                      <strong>Nota BCP:</strong> Como Yape y la Tarjeta BCP están vinculados a la misma cuenta, la suma inicial de ambos será utilizada para cuadrar el saldo bancario al cierre.
+                      <strong>Cuenta Vinculada:</strong> Al ingresar el saldo inicial de tu cuenta BCP, el sistema sumará automáticamente todos los cobros de <strong>Yape</strong> y <strong>Tarjeta POS BCP</strong> del día para cuadrar con el saldo final de tu app.
                     </span>
                   </div>
 
@@ -443,7 +396,7 @@ export default function WorkspaceCaja({
                     disabled={isPending}
                     className="w-full text-white font-bold py-3.5 px-4 rounded-xl bg-[#04558C] hover:bg-[#033f6b] shadow-md transition-colors text-center cursor-pointer disabled:opacity-50 text-base"
                   >
-                    {isPending ? '⏳ Abriendo Turno...' : '🚀 Abrir Turno con Saldos Iniciales'}
+                    {isPending ? '⏳ Abriendo Turno...' : '🚀 Abrir Turno de Caja'}
                   </button>
                 </form>
               </div>
@@ -471,58 +424,45 @@ export default function WorkspaceCaja({
                       <span className="text-gray-400 block text-[10px] uppercase font-bold">Fondo Efectivo</span>
                       <span className="font-bold text-emerald-700">S/. {efectivoApertura.toFixed(2)}</span>
                     </div>
-                    <div>
-                      <span className="text-gray-400 block text-[10px] uppercase font-bold">Inicial Yape</span>
-                      <span className="font-bold text-purple-700">S/. {yapeApertura.toFixed(2)}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400 block text-[10px] uppercase font-bold">Inicial Tarjeta BCP</span>
-                      <span className="font-bold text-amber-700">S/. {tarjetaApertura.toFixed(2)}</span>
-                    </div>
                     <div className="border-l pl-3">
-                      <span className="text-blue-600 block text-[10px] uppercase font-bold">Apertura BCP Total</span>
-                      <span className="font-black text-blue-800">S/. {totalAperturaBcp.toFixed(2)}</span>
+                      <span className="text-blue-700 block text-[10px] uppercase font-bold">Saldo Inicial BCP (Yape/Tarjeta)</span>
+                      <span className="font-black text-blue-900">S/. {bcpApertura.toFixed(2)}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* KPIs FINANCIEROS DEL TURNO EN VIVO */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   
                   {/* EFECTIVO ESTIMADO */}
                   <div className="bg-white p-5 rounded-xl border border-gray-200 border-l-4 border-l-emerald-500 shadow-sm">
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Efectivo Estimado</p>
+                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Efectivo Físico Estimado</p>
                     <h3 className="text-2xl font-black text-emerald-700">S/. {efectivoEstimado.toFixed(2)}</h3>
                     <p className="text-[10px] text-gray-400 font-semibold mt-1">
                       Inicial S/. {efectivoApertura.toFixed(2)} + Ventas S/. {ventasEfectivo.toFixed(2)}
                     </p>
                   </div>
 
-                  {/* SALDO YAPE ESTIMADO */}
-                  <div className="bg-white p-5 rounded-xl border border-gray-200 border-l-4 border-l-purple-500 shadow-sm">
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Yape / Plin Estimado</p>
-                    <h3 className="text-2xl font-black text-purple-700">S/. {yapeEstimado.toFixed(2)}</h3>
-                    <p className="text-[10px] text-gray-400 font-semibold mt-1">
-                      Inicial S/. {yapeApertura.toFixed(2)} + Ventas S/. {ventasYape.toFixed(2)}
-                    </p>
-                  </div>
-
-                  {/* SALDO TARJETA BCP ESTIMADO */}
-                  <div className="bg-white p-5 rounded-xl border border-gray-200 border-l-4 border-l-amber-500 shadow-sm">
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Tarjeta BCP / POS Estimada</p>
-                    <h3 className="text-2xl font-black text-amber-700">S/. {tarjetaEstimado.toFixed(2)}</h3>
-                    <p className="text-[10px] text-gray-400 font-semibold mt-1">
-                      Inicial S/. {tarjetaApertura.toFixed(2)} + Ventas S/. {ventasTarjeta.toFixed(2)}
-                    </p>
-                  </div>
-
-                  {/* CONSOLIDADO BANCO BCP */}
+                  {/* CONSOLIDADO CUENTA BCP (YAPE + TARJETA POS) */}
                   <div className="bg-white p-5 rounded-xl border border-blue-200 border-l-4 border-l-blue-600 bg-blue-50/20 shadow-sm">
-                    <p className="text-xs text-blue-800 font-bold uppercase tracking-wider mb-1">Total Cuenta BCP (Vínculo)</p>
-                    <h3 className="text-2xl font-black text-blue-900">S/. {totalEstimadoBcp.toFixed(2)}</h3>
+                    <p className="text-xs text-blue-800 font-bold uppercase tracking-wider mb-1">Saldo en Cuenta BCP Estimado</p>
+                    <h3 className="text-2xl font-black text-blue-900">S/. {bcpEstimado.toFixed(2)}</h3>
                     <p className="text-[10px] text-blue-600 font-semibold mt-1">
-                      Yape (S/. {yapeEstimado.toFixed(2)}) + POS BCP (S/. {tarjetaEstimado.toFixed(2)})
+                      Inicial S/. {bcpApertura.toFixed(2)} + Cobros BCP S/. {ventasTotalesBcp.toFixed(2)}
                     </p>
+                  </div>
+
+                  {/* DESGLOSE DE COBROS DIGITALES */}
+                  <div className="bg-white p-5 rounded-xl border border-gray-200 border-l-4 border-l-purple-500 shadow-sm">
+                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Cobros del Día en BCP</p>
+                    <div className="flex justify-between items-center text-xs font-semibold text-gray-700 mt-2">
+                      <span>📱 Yape / Plin:</span>
+                      <span className="font-bold text-purple-700">S/. {ventasYape.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs font-semibold text-gray-700 mt-1">
+                      <span>💳 Tarjeta POS:</span>
+                      <span className="font-bold text-amber-700">S/. {ventasTarjeta.toFixed(2)}</span>
+                    </div>
                   </div>
 
                 </div>
@@ -555,14 +495,14 @@ export default function WorkspaceCaja({
                         </div>
 
                         <div className="flex flex-col">
-                          <label className="text-[10px] font-bold text-gray-400 uppercase mb-1">Método Pago*</label>
+                          <label className="text-[10px] font-bold text-gray-400 uppercase mb-1">Medio Pago*</label>
                           <select 
                             value={metodoPagoMov}
                             onChange={e => setMetodoPagoMov(e.target.value)}
                             className="border border-gray-300 p-2 rounded-lg text-sm bg-white font-semibold focus:outline-none"
                           >
                             <option value="Efectivo">💵 Efectivo</option>
-                            <option value="Yape">📱 Yape / Plin</option>
+                            <option value="Yape">📱 Yape / BCP</option>
                             <option value="Tarjeta BCP">💳 Tarjeta BCP</option>
                             <option value="Transferencia">🏦 Transferencia</option>
                           </select>
@@ -619,7 +559,7 @@ export default function WorkspaceCaja({
                             <thead>
                               <tr className="bg-gray-50 text-gray-500 uppercase tracking-wider font-bold border-b">
                                 <th className="p-2">Hora</th>
-                                <th className="p-2">Método</th>
+                                <th className="p-2">Canal</th>
                                 <th className="p-2">Tipo</th>
                                 <th className="p-2 text-right">Monto</th>
                                 <th className="p-2 pl-4">Motivo</th>
@@ -660,15 +600,15 @@ export default function WorkspaceCaja({
                   <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6 flex flex-col justify-between shadow-sm">
                     <div className="space-y-4">
                       <h3 className="text-base font-bold text-gray-800 border-b pb-2 flex items-center justify-between">
-                        <span>🔒 Arqueo por Métodos de Pago</span>
+                        <span>🔒 Arqueo y Cuadre Final</span>
                         <span className="text-xs bg-red-50 text-red-700 font-bold px-2 py-0.5 rounded border border-red-200">Arqueo Requerido</span>
                       </h3>
 
-                      {/* 1. SECCIÓN EFECTIVO */}
+                      {/* 1. SECCIÓN EFECTIVO FÍSICO */}
                       <div className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-100 space-y-3">
                         <div className="flex justify-between items-center">
                           <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
-                            💵 Caja Efectivo
+                            💵 Efectivo en Caja Física
                           </h4>
                           <button
                             type="button"
@@ -710,86 +650,43 @@ export default function WorkspaceCaja({
                         </div>
                       </div>
 
-                      {/* 2. SECCIÓN YAPE / PLIN */}
-                      <div className="bg-purple-50/40 p-4 rounded-xl border border-purple-100 space-y-3">
-                        <h4 className="text-xs font-bold text-purple-800 uppercase tracking-wider flex justify-between items-center">
-                          <span>📱 Yape / Plin</span>
-                          <span className="font-mono text-purple-700">Esperado: S/. {yapeEstimado.toFixed(2)}</span>
-                        </h4>
+                      {/* 2. SECCIÓN CUENTA BCP VINCULADA (YAPE + TARJETA BCP) */}
+                      <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-200 space-y-3">
+                        <div className="flex justify-between items-center">
+                          <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider">
+                            📱💳 Cuenta BCP (Yape + Tarjeta)
+                          </h4>
+                          <span className="font-mono text-blue-800 text-xs font-bold">
+                            Esperado: S/. {bcpEstimado.toFixed(2)}
+                          </span>
+                        </div>
 
-                        <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 font-semibold pl-1">
-                          <span>Inicial: S/. {yapeApertura.toFixed(2)}</span>
-                          <span>Ventas: S/. {ventasYape.toFixed(2)}</span>
+                        <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-600 font-semibold pl-1 bg-white/60 p-2 rounded-lg border border-blue-100">
+                          <span>Inicial BCP: S/. {bcpApertura.toFixed(2)}</span>
+                          <span>Ventas Yape: S/. {ventasYape.toFixed(2)}</span>
+                          <span>Ventas POS: S/. {ventasTarjeta.toFixed(2)}</span>
+                          <span className="text-red-500">Gastos BCP: - S/. {egresosBcp.toFixed(2)}</span>
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-bold text-gray-500 block mb-1">Monto Real en Yape (S/.)*</label>
+                          <label className="text-[10px] font-bold text-gray-600 block mb-1">
+                            Saldo Final en App BCP / Yape (S/.)*
+                          </label>
                           <input 
                             type="number"
                             step="0.01"
                             required
                             min="0"
-                            value={montoRealYape}
-                            onChange={e => setMontoRealYape(parseFloat(e.target.value) || 0)}
-                            className="w-full border border-gray-300 px-3 py-1.5 rounded-lg text-gray-900 bg-white font-bold text-sm text-center focus:outline-none focus:border-purple-600"
+                            value={montoRealBcp}
+                            onChange={e => setMontoRealBcp(parseFloat(e.target.value) || 0)}
+                            className="w-full border border-blue-300 px-3 py-1.5 rounded-lg text-gray-900 bg-white font-bold text-sm text-center focus:outline-none focus:border-blue-600"
                           />
                         </div>
 
-                        <div className="flex justify-between items-center text-[10px] bg-white p-2 rounded-lg border border-purple-100 font-bold">
-                          <span className="text-gray-400">Diferencia Yape:</span>
-                          <span className={diffYape === 0 ? 'text-green-600' : diffYape < 0 ? 'text-red-600' : 'text-blue-600'}>
-                            {diffYape > 0 ? '+' : ''}{diffYape.toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* 3. SECCIÓN TARJETA BCP / POS */}
-                      <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-100 space-y-3">
-                        <h4 className="text-xs font-bold text-amber-800 uppercase tracking-wider flex justify-between items-center">
-                          <span>💳 Tarjeta BCP / POS</span>
-                          <span className="font-mono text-amber-700">Esperado: S/. {tarjetaEstimado.toFixed(2)}</span>
-                        </h4>
-
-                        <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 font-semibold pl-1">
-                          <span>Inicial: S/. {tarjetaApertura.toFixed(2)}</span>
-                          <span>Ventas: S/. {ventasTarjeta.toFixed(2)}</span>
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] font-bold text-gray-500 block mb-1">Monto Real en POS (S/.)*</label>
-                          <input 
-                            type="number"
-                            step="0.01"
-                            required
-                            min="0"
-                            value={montoRealTarjeta}
-                            onChange={e => setMontoRealTarjeta(parseFloat(e.target.value) || 0)}
-                            className="w-full border border-gray-300 px-3 py-1.5 rounded-lg text-gray-900 bg-white font-bold text-sm text-center focus:outline-none focus:border-amber-600"
-                          />
-                        </div>
-
-                        <div className="flex justify-between items-center text-[10px] bg-white p-2 rounded-lg border border-amber-100 font-bold">
-                          <span className="text-gray-400">Diferencia Tarjeta:</span>
-                          <span className={diffTarjeta === 0 ? 'text-green-600' : diffTarjeta < 0 ? 'text-red-600' : 'text-blue-600'}>
-                            {diffTarjeta > 0 ? '+' : ''}{diffTarjeta.toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* 4. CONSOLIDADO BCP (YAPE + POS) */}
-                      <div className="bg-blue-50/60 p-4 rounded-xl border border-blue-200 space-y-2">
-                        <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider flex justify-between items-center">
-                          <span>🏦 Consolidado Cuenta BCP</span>
-                          <span className="font-mono text-blue-800">Esperado: S/. {totalEstimadoBcp.toFixed(2)}</span>
-                        </h4>
-                        <div className="flex justify-between items-center text-xs font-bold text-blue-950 bg-white p-2.5 rounded-lg border border-blue-100">
-                          <span>Total Real BCP (Yape + POS):</span>
-                          <span>S/. {totalRealBcp.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-[10px] font-bold text-gray-600 px-1">
-                          <span>Descuadre Banco BCP:</span>
-                          <span className={diferenciaBcp === 0 ? 'text-green-600' : diferenciaBcp < 0 ? 'text-red-600' : 'text-blue-600'}>
-                            {diferenciaBcp > 0 ? '+' : ''}{diferenciaBcp.toFixed(2)}
+                        <div className="flex justify-between items-center text-[10px] bg-white p-2 rounded-lg border border-blue-100 font-bold">
+                          <span className="text-gray-400">Diferencia Cuenta BCP:</span>
+                          <span className={diffBcp === 0 ? 'text-green-600' : diffBcp < 0 ? 'text-red-600' : 'text-blue-600'}>
+                            {diffBcp > 0 ? '+' : ''}{diffBcp.toFixed(2)}
                           </span>
                         </div>
                       </div>
@@ -861,10 +758,9 @@ export default function WorkspaceCaja({
                       <th className="p-3 pl-4">Apertura</th>
                       <th className="p-3">Cierre</th>
                       <th className="p-3 text-right">Inicial Efectivo</th>
-                      <th className="p-3 text-right">Inicial Yape</th>
-                      <th className="p-3 text-right">Inicial Tarjeta</th>
+                      <th className="p-3 text-right">Inicial BCP</th>
                       <th className="p-3 text-right">Efectivo Real</th>
-                      <th className="p-3 text-right">Yape Real</th>
+                      <th className="p-3 text-right">BCP Real</th>
                       <th className="p-3 text-right">Dif. Efectivo</th>
                       <th className="p-3 text-center">Acciones</th>
                     </tr>
@@ -891,10 +787,9 @@ export default function WorkspaceCaja({
                             )}
                           </td>
                           <td className="p-3 text-right font-mono font-medium">S/. {Number(c.monto_apertura).toFixed(2)}</td>
-                          <td className="p-3 text-right font-mono font-medium text-purple-700">S/. {Number(c.monto_apertura_yape || 0).toFixed(2)}</td>
-                          <td className="p-3 text-right font-mono font-medium text-amber-700">S/. {Number(c.monto_apertura_tarjeta || 0).toFixed(2)}</td>
+                          <td className="p-3 text-right font-mono font-medium text-blue-700">S/. {Number(c.monto_apertura_yape || c.monto_apertura_tarjeta || 0).toFixed(2)}</td>
                           <td className="p-3 text-right font-mono font-bold text-gray-800">S/. {Number(c.monto_cierre_efectivo_real || 0).toFixed(2)}</td>
-                          <td className="p-3 text-right font-mono font-bold text-purple-800">S/. {Number(c.monto_cierre_yape_real || 0).toFixed(2)}</td>
+                          <td className="p-3 text-right font-mono font-bold text-blue-800">S/. {Number(c.monto_cierre_yape_real || c.monto_cierre_tarjeta_real || 0).toFixed(2)}</td>
                           <td className={`p-3 text-right font-mono font-bold ${
                             diff === 0 
                               ? 'text-green-600' 
@@ -1046,25 +941,18 @@ export default function WorkspaceCaja({
               </div>
 
               <div className="border-t border-dashed pt-2 space-y-1">
-                <p className="font-bold text-gray-800">1. CAJA EFECTIVO</p>
-                <div className="flex justify-between pl-2"><span>Inicial:</span><span>S/. {Number(ticketData.monto_apertura).toFixed(2)}</span></div>
+                <p className="font-bold text-gray-800">1. CAJA EFECTIVO FÍSICO</p>
+                <div className="flex justify-between pl-2"><span>Fondo Inicial:</span><span>S/. {Number(ticketData.monto_apertura).toFixed(2)}</span></div>
                 <div className="flex justify-between pl-2"><span>Esperado:</span><span>S/. {Number(ticketData.monto_cierre_efectivo_calculado).toFixed(2)}</span></div>
                 <div className="flex justify-between pl-2 font-bold"><span>Real Contado:</span><span>S/. {Number(ticketData.monto_cierre_efectivo_real).toFixed(2)}</span></div>
                 <div className="flex justify-between pl-2 font-bold text-gray-600"><span>Diferencia:</span><span>S/. {Number(ticketData.diferencia).toFixed(2)}</span></div>
               </div>
 
               <div className="border-t border-dashed pt-2 space-y-1">
-                <p className="font-bold text-gray-800">2. YAPE / PLIN</p>
-                <div className="flex justify-between pl-2"><span>Inicial:</span><span>S/. {Number(ticketData.monto_apertura_yape || 0).toFixed(2)}</span></div>
-                <div className="flex justify-between pl-2 font-bold"><span>Real Yape:</span><span>S/. {Number(ticketData.monto_cierre_yape_real || 0).toFixed(2)}</span></div>
-                <div className="flex justify-between pl-2 font-bold text-gray-600"><span>Diferencia:</span><span>S/. {Number(ticketData.diferencia_yape || 0).toFixed(2)}</span></div>
-              </div>
-
-              <div className="border-t border-dashed pt-2 space-y-1">
-                <p className="font-bold text-gray-800">3. TARJETA BCP / POS</p>
-                <div className="flex justify-between pl-2"><span>Inicial:</span><span>S/. {Number(ticketData.monto_apertura_tarjeta || 0).toFixed(2)}</span></div>
-                <div className="flex justify-between pl-2 font-bold"><span>Real Tarjeta:</span><span>S/. {Number(ticketData.monto_cierre_tarjeta_real || 0).toFixed(2)}</span></div>
-                <div className="flex justify-between pl-2 font-bold text-gray-600"><span>Diferencia:</span><span>S/. {Number(ticketData.diferencia_tarjeta || 0).toFixed(2)}</span></div>
+                <p className="font-bold text-gray-800">2. CUENTA BCP (YAPE + POS TARJETA)</p>
+                <div className="flex justify-between pl-2"><span>Saldo Inicial BCP:</span><span>S/. {Number(ticketData.monto_apertura_yape || ticketData.monto_apertura_tarjeta || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between pl-2 font-bold"><span>Real en App BCP:</span><span>S/. {Number(ticketData.monto_cierre_yape_real || ticketData.monto_cierre_tarjeta_real || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between pl-2 font-bold text-gray-600"><span>Diferencia BCP:</span><span>S/. {Number(ticketData.diferencia_yape || ticketData.diferencia_tarjeta || 0).toFixed(2)}</span></div>
               </div>
 
               {ticketData.nota && (
@@ -1125,17 +1013,17 @@ export default function WorkspaceCaja({
               </button>
             </div>
 
-            {/* Cuadre general por Métodos de Pago */}
+            {/* Cuadre general por Canales */}
             <div className="space-y-3 mb-6 text-xs">
               <h4 className="font-bold text-gray-800 text-xs uppercase tracking-wider">
-                Resumen de Arqueos y Desbalances del Turno
+                Resumen de Arqueos del Turno
               </h4>
 
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-gray-700">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-gray-700">
                 
                 {/* Arqueo Efectivo */}
                 <div className="bg-emerald-50/50 p-3 rounded-lg border border-emerald-100 space-y-1.5">
-                  <span className="font-bold text-emerald-800 block text-[9px] uppercase">💵 Efectivo</span>
+                  <span className="font-bold text-emerald-800 block text-[9px] uppercase">💵 Efectivo Físico</span>
                   <div className="text-[10px] text-gray-500 space-y-0.5">
                     <p>Fondo Inicial: S/. {Number(cierreSeleccionado.monto_apertura).toFixed(2)}</p>
                     <p>Esperado: S/. {Number(cierreSeleccionado.monto_cierre_efectivo_calculado || 0).toFixed(2)}</p>
@@ -1149,50 +1037,17 @@ export default function WorkspaceCaja({
                   </div>
                 </div>
 
-                {/* Arqueo Yape/Plin */}
-                <div className="bg-purple-50/50 p-3 rounded-lg border border-purple-100 space-y-1.5">
-                  <span className="font-bold text-purple-800 block text-[9px] uppercase">📱 Yape / Plin</span>
+                {/* Arqueo Cuenta BCP (Yape + Tarjeta) */}
+                <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-200 space-y-1.5">
+                  <span className="font-bold text-blue-900 block text-[9px] uppercase">📱💳 Cuenta BCP (Yape + Tarjeta POS)</span>
                   <div className="text-[10px] text-gray-500 space-y-0.5">
-                    <p>Inicial: S/. {Number(cierreSeleccionado.monto_apertura_yape || 0).toFixed(2)}</p>
-                    <p>Ventas: S/. {Number(cierreSeleccionado.total_ventas_yape || 0).toFixed(2)}</p>
-                    <p className="font-bold text-gray-700">Real: S/. {Number(cierreSeleccionado.monto_cierre_yape_real || 0).toFixed(2)}</p>
+                    <p>Inicial BCP: S/. {Number(cierreSeleccionado.monto_apertura_yape || cierreSeleccionado.monto_apertura_tarjeta || 0).toFixed(2)}</p>
+                    <p className="font-bold text-gray-700">Real en App BCP: S/. {Number(cierreSeleccionado.monto_cierre_yape_real || cierreSeleccionado.monto_cierre_tarjeta_real || 0).toFixed(2)}</p>
                   </div>
                   <div className="border-t pt-1 flex justify-between font-bold">
-                    <span className="text-gray-400 text-[8px] uppercase">Dif:</span>
-                    <span className={Number(cierreSeleccionado.diferencia_yape || 0) === 0 ? 'text-green-600' : Number(cierreSeleccionado.diferencia_yape || 0) < 0 ? 'text-red-600' : 'text-blue-600'}>
-                      {Number(cierreSeleccionado.diferencia_yape || 0) > 0 ? '+' : ''}{Number(cierreSeleccionado.diferencia_yape || 0).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Arqueo Transferencia */}
-                <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100 space-y-1.5">
-                  <span className="font-bold text-blue-800 block text-[9px] uppercase">🏦 Transferencia</span>
-                  <div className="text-[10px] text-gray-500 space-y-0.5">
-                    <p>Inicial: S/. {Number(cierreSeleccionado.monto_apertura_transferencia || 0).toFixed(2)}</p>
-                    <p>Ventas: S/. {Number(cierreSeleccionado.total_ventas_transferencia || 0).toFixed(2)}</p>
-                    <p className="font-bold text-gray-700">Real: S/. {Number(cierreSeleccionado.monto_cierre_transferencia_real || 0).toFixed(2)}</p>
-                  </div>
-                  <div className="border-t pt-1 flex justify-between font-bold">
-                    <span className="text-gray-400 text-[8px] uppercase">Dif:</span>
-                    <span className={Number(cierreSeleccionado.diferencia_transferencia || 0) === 0 ? 'text-green-600' : Number(cierreSeleccionado.diferencia_transferencia || 0) < 0 ? 'text-red-600' : 'text-blue-600'}>
-                      {Number(cierreSeleccionado.diferencia_transferencia || 0) > 0 ? '+' : ''}{Number(cierreSeleccionado.diferencia_transferencia || 0).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Arqueo Tarjeta */}
-                <div className="bg-amber-50/50 p-3 rounded-lg border border-amber-100 space-y-1.5">
-                  <span className="font-bold text-amber-800 block text-[9px] uppercase">💳 Tarjetas BCP</span>
-                  <div className="text-[10px] text-gray-500 space-y-0.5">
-                    <p>Inicial: S/. {Number(cierreSeleccionado.monto_apertura_tarjeta || 0).toFixed(2)}</p>
-                    <p>Ventas: S/. {Number(cierreSeleccionado.total_ventas_tarjeta || 0).toFixed(2)}</p>
-                    <p className="font-bold text-gray-700">Real: S/. {Number(cierreSeleccionado.monto_cierre_tarjeta_real || 0).toFixed(2)}</p>
-                  </div>
-                  <div className="border-t pt-1 flex justify-between font-bold">
-                    <span className="text-gray-400 text-[8px] uppercase">Dif:</span>
-                    <span className={Number(cierreSeleccionado.diferencia_tarjeta || 0) === 0 ? 'text-green-600' : Number(cierreSeleccionado.diferencia_tarjeta || 0) < 0 ? 'text-red-600' : 'text-blue-600'}>
-                      {Number(cierreSeleccionado.diferencia_tarjeta || 0) > 0 ? '+' : ''}{Number(cierreSeleccionado.diferencia_tarjeta || 0).toFixed(2)}
+                    <span className="text-gray-400 text-[8px] uppercase">Dif BCP:</span>
+                    <span className={Number(cierreSeleccionado.diferencia_yape || cierreSeleccionado.diferencia_tarjeta || 0) === 0 ? 'text-green-600' : Number(cierreSeleccionado.diferencia_yape || cierreSeleccionado.diferencia_tarjeta || 0) < 0 ? 'text-red-600' : 'text-blue-600'}>
+                      {Number(cierreSeleccionado.diferencia_yape || cierreSeleccionado.diferencia_tarjeta || 0) > 0 ? '+' : ''}{Number(cierreSeleccionado.diferencia_yape || cierreSeleccionado.diferencia_tarjeta || 0).toFixed(2)}
                     </span>
                   </div>
                 </div>
