@@ -2,6 +2,7 @@ import { useState, useTransition, useEffect } from 'react'
 import { buscarCliente, guardarCliente, crearNuevaVenta, buscarClientes, buscarDniRucPeru } from './actions'
 import { guardarProducto } from '../actions'
 import { crearCompra } from '../compras/actions'
+import { obtenerSesionCajaActiva, guardarMovimientoCajaChica } from '../caja/actions'
 import ComprobantePrint from '../../components/ComprobantePrint'
 import type { CompraData } from '../../lib/compras.service'
 
@@ -36,6 +37,7 @@ interface CartItem {
   proveedor_nombre?: string
   costo_adquisicion_al_paso?: number
   comprobante_proveedor?: string
+  metodo_pago_compra?: string
   es_producto_eventual?: boolean
 }
 
@@ -75,6 +77,7 @@ export default function RegistroVentas({
     precio_venta: 0,
     costo_compra: 0,
     proveedor_nombre: '',
+    metodo_pago_compra: 'Efectivo',
     cantidad_cajas: 1,
     piezas_sueltas: 0,
     lote: '',
@@ -354,6 +357,7 @@ export default function RegistroVentas({
       es_compra_al_paso: true,
       proveedor_nombre: formEventual.proveedor_nombre.trim() || 'Tienda Externa',
       costo_adquisicion_al_paso: formEventual.costo_compra || 0,
+      metodo_pago_compra: formEventual.metodo_pago_compra || 'Efectivo',
       es_producto_eventual: true
     }
 
@@ -361,7 +365,7 @@ export default function RegistroVentas({
     setMostrarModalEventual(false)
     setFormEventual({
       nombre: '', categoria: 'Porcelanato', m2_caja: 1.44, precio_venta: 0, costo_compra: 0,
-      proveedor_nombre: '', cantidad_cajas: 1, piezas_sueltas: 0, lote: '', tono: '', calibre: ''
+      proveedor_nombre: '', metodo_pago_compra: 'Efectivo', cantidad_cajas: 1, piezas_sueltas: 0, lote: '', tono: '', calibre: ''
     })
     setBusquedaProd('')
     setMostrarSugerenciasProd(false)
@@ -614,13 +618,22 @@ export default function RegistroVentas({
           }
         }
 
-        // 1. Procesar Compras al Paso primero (si las hay y no es una simple cotización)
+        // 1. Procesar Compras al Paso / Productos Eventuales (si las hay y no es una simple cotización)
         const itemsAlPaso = carrito.filter(i => i.es_compra_al_paso)
         if (itemsAlPaso.length > 0 && estadoVenta !== 'COTIZACION') {
-          const payloadCompra: CompraData = {
-            proveedor_id: null,
-            numero_factura: itemsAlPaso[0].comprobante_proveedor || `COMPRA-PASO-${Date.now().toString().slice(-6)}`,
-            total: itemsAlPaso.reduce((sum, i) => {
+          // Obtener sesión activa de caja para registrar egresos en caja chica si corresponde
+          const sesionActiva = await obtenerSesionCajaActiva().catch(() => null)
+
+          // Agrupar items al paso por su método de pago de compra (por defecto 'Efectivo')
+          const gruposMetodoPago = itemsAlPaso.reduce((acc: { [metodo: string]: typeof itemsAlPaso }, item) => {
+            const met = item.metodo_pago_compra || 'Efectivo'
+            if (!acc[met]) acc[met] = []
+            acc[met].push(item)
+            return acc
+          }, {})
+
+          for (const [metodoPagoCompra, itemsGrupo] of Object.entries(gruposMetodoPago)) {
+            const totalGrupo = itemsGrupo.reduce((sum, i) => {
               const costo = i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0)
               if (i.producto.m2_caja > 0) {
                 const totalM2 = (i.cantidad_cajas * i.producto.m2_caja) + (i.piezas_sueltas * (i.producto.m2_caja / (i.piezas_por_caja || 6)))
@@ -628,26 +641,44 @@ export default function RegistroVentas({
               } else {
                 return sum + (i.piezas_sueltas * costo)
               }
-            }, 0),
-            metodo_pago: 'Efectivo',
-            nota: `Compra al paso automática vinculada a cliente ${clienteSeleccionado?.nombre_razon_social || 'General'} (Tienda/Prov: ${itemsAlPaso.map(i => i.proveedor_nombre || 'Externa').join(', ')})`,
-            items: itemsAlPaso.map(i => ({
-              producto_id: i.producto.id,
-              cantidad_cajas: i.cantidad_cajas,
-              piezas_sueltas: i.piezas_sueltas,
-              costo_unitario: i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0),
-              subtotal: i.producto.m2_caja > 0 
-                ? parseFloat((((i.cantidad_cajas * i.producto.m2_caja) + (i.piezas_sueltas * (i.producto.m2_caja / (i.piezas_por_caja || 6)))) * (i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0))).toFixed(2))
-                : parseFloat((i.piezas_sueltas * (i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0))).toFixed(2)),
-              lote: i.lote || null,
-              tono: i.tono || null,
-              calibre: i.calibre || null
-            }))
-          }
+            }, 0)
 
-          const resCompra = await crearCompra(payloadCompra)
-          if (!resCompra.success) {
-            throw new Error(resCompra.error || 'Error al procesar la compra al paso')
+            const payloadCompra: CompraData = {
+              proveedor_id: null,
+              numero_factura: itemsGrupo[0].comprobante_proveedor || `COMPRA-PASO-${Date.now().toString().slice(-6)}`,
+              total: parseFloat(totalGrupo.toFixed(2)),
+              metodo_pago: metodoPagoCompra as any,
+              nota: `Compra al paso automática vinculada a cliente ${clienteSeleccionado?.nombre_razon_social || 'General'} (Tienda/Prov: ${itemsGrupo.map(i => i.proveedor_nombre || 'Externa').join(', ')}) [Forma Pago: ${metodoPagoCompra}]`,
+              items: itemsGrupo.map(i => ({
+                producto_id: i.producto.id,
+                cantidad_cajas: i.cantidad_cajas,
+                piezas_sueltas: i.piezas_sueltas,
+                costo_unitario: i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0),
+                subtotal: i.producto.m2_caja > 0 
+                  ? parseFloat((((i.cantidad_cajas * i.producto.m2_caja) + (i.piezas_sueltas * (i.producto.m2_caja / (i.piezas_por_caja || 6)))) * (i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0))).toFixed(2))
+                  : parseFloat((i.piezas_sueltas * (i.costo_adquisicion_al_paso !== undefined ? i.costo_adquisicion_al_paso : (i.costo_unitario || 0))).toFixed(2)),
+                lote: i.lote || null,
+                tono: i.tono || null,
+                calibre: i.calibre || null
+              }))
+            }
+
+            const resCompra = await crearCompra(payloadCompra)
+            if (!resCompra.success) {
+              throw new Error(resCompra.error || 'Error al procesar la compra al paso')
+            }
+
+            // Si hay sesión de caja abierta y no fue a crédito de proveedor, registrar el egreso para descontar de caja/cuenta
+            if (sesionActiva && sesionActiva.id && metodoPagoCompra !== 'Credito' && metodoPagoCompra !== 'Sin Especificar' && totalGrupo > 0) {
+              const nombresProds = itemsGrupo.map(i => i.producto.nombre).join(', ')
+              await guardarMovimientoCajaChica(
+                sesionActiva.id,
+                'EGRESO',
+                parseFloat(totalGrupo.toFixed(2)),
+                `Compra al paso / Prod. eventual: ${nombresProds.length > 50 ? nombresProds.slice(0, 47) + '...' : nombresProds}`,
+                metodoPagoCompra
+              ).catch((e: any) => console.warn('No se pudo registrar egreso en caja chica:', e.message))
+            }
           }
         }
 
@@ -1076,6 +1107,21 @@ export default function RegistroVentas({
                                       className="w-full border border-amber-300 p-1 rounded text-xs text-gray-900 bg-white focus:outline-none"
                                     />
                                   </div>
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-amber-700 uppercase block">Forma de Pago Compra (Egreso)</label>
+                                  <select
+                                    value={item.metodo_pago_compra || 'Efectivo'}
+                                    onChange={e => actualizarItemCarrito(p.id, 'metodo_pago_compra', e.target.value)}
+                                    className="w-full border border-amber-300 p-1 rounded text-xs text-gray-900 font-bold bg-white focus:outline-none"
+                                  >
+                                    <option value="Efectivo">💵 Efectivo (Caja Física)</option>
+                                    <option value="Yape/Plin">📱 Yape / Plin</option>
+                                    <option value="Transferencia BCP">🏦 Transferencia BCP</option>
+                                    <option value="Transferencia Interbancaria">🏦 Transf. Interbancaria</option>
+                                    <option value="Tarjeta Credito/Debito">💳 Tarjeta Crédito / Débito</option>
+                                    <option value="Credito">⏱️ Crédito Proveedor</option>
+                                  </select>
                                 </div>
                                 <p className="text-[9px] text-amber-600 font-medium italic">
                                   🔒 Privado: Estos datos NO se imprimirán en el comprobante del cliente.
@@ -1942,6 +1988,27 @@ export default function RegistroVentas({
                     </div>
                   )}
                 </div>
+              </div>
+
+              <div className="bg-amber-50/80 p-3 rounded-lg border border-amber-300 space-y-1.5">
+                <label className="font-bold text-amber-900 block text-xs">
+                  💳 Forma de Compra / Método de Pago (Egreso de Caja)*
+                </label>
+                <select
+                  value={formEventual.metodo_pago_compra}
+                  onChange={e => setFormEventual({ ...formEventual, metodo_pago_compra: e.target.value })}
+                  className="w-full border border-amber-300 p-2 rounded-lg bg-white text-gray-900 font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs"
+                >
+                  <option value="Efectivo">💵 Efectivo (Caja Física)</option>
+                  <option value="Yape/Plin">📱 Yape / Plin</option>
+                  <option value="Transferencia BCP">🏦 Transferencia BCP</option>
+                  <option value="Transferencia Interbancaria">🏦 Transf. Interbancaria</option>
+                  <option value="Tarjeta Credito/Debito">💳 Tarjeta Crédito / Débito</option>
+                  <option value="Credito">⏱️ Crédito Proveedor (Sin egreso inmediato)</option>
+                </select>
+                <p className="text-[10px] text-amber-700 font-medium">
+                  💡 Este método de pago se utilizará para registrar la compra al paso y descontar el egreso del arqueo de Caja en el canal respectivo.
+                </p>
               </div>
 
               <div className="grid grid-cols-3 gap-2">

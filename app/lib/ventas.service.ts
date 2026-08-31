@@ -116,6 +116,8 @@ export async function getCuentasPorCobrar(empresaId?: string): Promise<any[]> {
       )
     `)
     .in('estado_pago', ['PENDIENTE', 'PAGADO_PARCIAL'])
+    .neq('estado', 'ANULADO')
+    .neq('estado_pago', 'ANULADO')
     .order('fecha', { ascending: false })
 
   if (empresaId) {
@@ -243,17 +245,190 @@ export async function getKardex(productoId?: string): Promise<any[]> {
  * Anula una venta registrada en el sistema.
  * Revierte el stock al inventario, registra el movimiento de Kardex (ANULACION_VENTA)
  * y actualiza el estado de la venta a ANULADO.
+ * Cuenta con fallback completo en caso de que la función RPC no esté creada en Supabase.
  */
 export async function anularVenta(ventaId: string, motivo?: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc('anular_venta', {
-    p_venta_id: ventaId,
-    p_motivo: motivo || null
-  })
+  try {
+    const { data, error } = await supabase.rpc('anular_venta', {
+      p_venta_id: ventaId,
+      p_motivo: motivo || null
+    })
 
-  if (error) {
-    throw new Error(`Error al anular la venta: ${error.message}`)
+    if (!error) {
+      // Asegurar limpieza de saldo pendiente y estado de pago
+      try {
+        await supabase
+          .from('ventas')
+          .update({
+            estado: 'ANULADO',
+            estado_pago: 'ANULADO',
+            saldo_pendiente: 0.00
+          })
+          .eq('id', ventaId)
+      } catch (errSync) {
+        console.warn('Advertencia al sincronizar estado de pago en anulación:', errSync)
+      }
+      return Boolean(data)
+    }
+
+    console.warn('RPC anular_venta falló o no existe en Supabase, ejecutando anulación vía fallback:', error.message)
+  } catch (rpcErr) {
+    console.warn('Error al invocar RPC anular_venta, ejecutando fallback:', rpcErr)
   }
 
-  return Boolean(data)
+  // --- FALLBACK DIRECTO VIA SUPABASE CLIENT ---
+  // 1. Obtener la venta
+  const { data: venta, error: errVenta } = await supabase
+    .from('ventas')
+    .select('id, codigo_venta, estado, nota')
+    .eq('id', ventaId)
+    .single()
+
+  if (errVenta || !venta) {
+    throw new Error(`La venta especificada no existe: ${errVenta?.message || ''}`)
+  }
+
+  if (venta.estado === 'ANULADO') {
+    throw new Error(`La venta ${venta.codigo_venta} ya se encuentra anulada.`)
+  }
+
+  // 2. Restituir stock e insertar en Kardex si la venta no era solo cotización
+  if (venta.estado === 'PAGADO' || venta.estado === 'ENTREGADO') {
+    const { data: items, error: errItems } = await supabase
+      .from('ventas_detalle')
+      .select('producto_id, cantidad_cajas, piezas_sueltas')
+      .eq('venta_id', ventaId)
+
+    if (errItems) {
+      throw new Error(`Error al obtener items de la venta: ${errItems.message}`)
+    }
+
+    if (items && items.length > 0) {
+      for (const item of items) {
+        // Verificar si es combo
+        const { data: componentes } = await supabase
+          .from('producto_componentes')
+          .select('componente_id, cantidad')
+          .eq('combo_id', item.producto_id)
+
+        if (componentes && componentes.length > 0) {
+          // Devolver stock de componentes de combo
+          for (const comp of componentes) {
+            const { data: compProd } = await supabase
+              .from('inventario')
+              .select('id, stock, piezas_sueltas, m2_caja, piezas_por_caja')
+              .eq('id', comp.componente_id)
+              .single()
+
+            if (compProd) {
+              const cantReq = (Number(item.cantidad_cajas || 0) + Number(item.piezas_sueltas || 0)) * Number(comp.cantidad)
+              if (Number(compProd.m2_caja || 0) > 0) {
+                await supabase
+                  .from('inventario')
+                  .update({ stock: Number(compProd.stock || 0) + cantReq })
+                  .eq('id', comp.componente_id)
+
+                await supabase.from('kardex').insert({
+                  producto_id: comp.componente_id,
+                  tipo: 'ENTRADA',
+                  cantidad_cajas: cantReq,
+                  piezas_sueltas: 0,
+                  motivo: 'ANULACION_VENTA',
+                  referencia_id: ventaId
+                })
+              } else {
+                await supabase
+                  .from('inventario')
+                  .update({ stock: Number(compProd.stock || 0) + cantReq })
+                  .eq('id', comp.componente_id)
+
+                await supabase.from('kardex').insert({
+                  producto_id: comp.componente_id,
+                  tipo: 'ENTRADA',
+                  cantidad_cajas: 0,
+                  piezas_sueltas: cantReq,
+                  motivo: 'ANULACION_VENTA',
+                  referencia_id: ventaId
+                })
+              }
+            }
+          }
+        } else {
+          // Producto estándar
+          const { data: prod } = await supabase
+            .from('inventario')
+            .select('id, stock, piezas_sueltas, m2_caja, piezas_por_caja')
+            .eq('id', item.producto_id)
+            .single()
+
+          if (prod) {
+            const m2Caja = Number(prod.m2_caja || 0)
+            const pzsPorCaja = Math.max(Number(prod.piezas_por_caja || 6), 1)
+            const cjsDevueltas = Number(item.cantidad_cajas || 0)
+            const pzsDevueltas = Number(item.piezas_sueltas || 0)
+
+            if (m2Caja > 0) {
+              const totalPzs = Number(prod.piezas_sueltas || 0) + pzsDevueltas
+              const cjsAdicionales = Math.floor(totalPzs / pzsPorCaja)
+              const pzsFinales = totalPzs % pzsPorCaja
+              const stockFinal = Number(prod.stock || 0) + cjsDevueltas + cjsAdicionales
+
+              await supabase
+                .from('inventario')
+                .update({
+                  stock: stockFinal,
+                  piezas_sueltas: pzsFinales
+                })
+                .eq('id', item.producto_id)
+
+              await supabase.from('kardex').insert({
+                producto_id: item.producto_id,
+                tipo: 'ENTRADA',
+                cantidad_cajas: cjsDevueltas,
+                piezas_sueltas: pzsDevueltas,
+                motivo: 'ANULACION_VENTA',
+                referencia_id: ventaId
+              })
+            } else {
+              const stockFinal = Number(prod.stock || 0) + pzsDevueltas
+
+              await supabase
+                .from('inventario')
+                .update({ stock: stockFinal })
+                .eq('id', item.producto_id)
+
+              await supabase.from('kardex').insert({
+                producto_id: item.producto_id,
+                tipo: 'ENTRADA',
+                cantidad_cajas: 0,
+                piezas_sueltas: pzsDevueltas,
+                motivo: 'ANULACION_VENTA',
+                referencia_id: ventaId
+              })
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Marcar venta como ANULADO y limpiar deuda
+  const notaAnulacion = (venta.nota ? venta.nota + '\n' : '') + `[ANULADO]: ${motivo || 'Anulación de venta'}`
+
+  const { error: errUpdate } = await supabase
+    .from('ventas')
+    .update({
+      estado: 'ANULADO',
+      estado_pago: 'ANULADO',
+      saldo_pendiente: 0.00,
+      nota: notaAnulacion.trim()
+    })
+    .eq('id', ventaId)
+
+  if (errUpdate) {
+    throw new Error(`Error al actualizar estado de la venta: ${errUpdate.message}`)
+  }
+
+  return true
 }
 

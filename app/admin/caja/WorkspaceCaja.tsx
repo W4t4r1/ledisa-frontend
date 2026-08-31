@@ -95,17 +95,28 @@ export default function WorkspaceCaja({
   let ventasTransferencia = 0
 
   ventasConfirmadas.forEach(v => {
-    const totalVal = Number(v.total)
-    const m = (v.metodo_pago || '').toLowerCase()
-    
-    if (m.includes('efectivo')) {
-      ventasEfectivo += totalVal
-    } else if (m.includes('yape') || m.includes('plin')) {
-      ventasYape += totalVal
-    } else if (m.includes('tarjeta') || m.includes('credito') || m.includes('debito')) {
-      ventasTarjeta += totalVal
+    const sumarCanal = (met: string, monto: number) => {
+      const m = (met || '').toLowerCase()
+      if (m.includes('efectivo')) {
+        ventasEfectivo += monto
+      } else if (m.includes('yape') || m.includes('plin')) {
+        ventasYape += monto
+      } else if (m.includes('tarjeta') || m.includes('credito') || m.includes('debito')) {
+        ventasTarjeta += monto
+      } else {
+        ventasTransferencia += monto
+      }
+    }
+
+    if (v.venta_pagos && v.venta_pagos.length > 0) {
+      v.venta_pagos.forEach((vp: any) => {
+        sumarCanal(vp.metodo_pago, Number(vp.monto))
+      })
     } else {
-      ventasTransferencia += totalVal
+      const montoRealVenta = v.monto_pagado !== null && v.monto_pagado !== undefined
+        ? Number(v.monto_pagado)
+        : (v.estado_pago === 'PENDIENTE' ? 0 : Number(v.total))
+      sumarCanal(v.metodo_pago || 'Efectivo', montoRealVenta)
     }
   })
 

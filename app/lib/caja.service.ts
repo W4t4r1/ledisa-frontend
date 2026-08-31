@@ -336,7 +336,9 @@ export async function ejecutarCierreCaja(
         sumarMetodo(vp.metodo_pago, Number(vp.monto))
       })
     } else {
-      const montoEfectivoVenta = Number(v.monto_pagado) || Number(v.total)
+      const montoEfectivoVenta = v.monto_pagado !== null && v.monto_pagado !== undefined
+        ? Number(v.monto_pagado)
+        : (v.estado_pago === 'PENDIENTE' ? 0 : Number(v.total))
       sumarMetodo(v.metodo_pago || 'Efectivo', montoEfectivoVenta)
     }
   })

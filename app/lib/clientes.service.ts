@@ -1,4 +1,4 @@
-import { supabase } from './supabase'
+3import { supabase } from './supabase'
 
 export interface Cliente {
   id?: string

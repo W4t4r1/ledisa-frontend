@@ -1317,83 +1317,87 @@ BEGIN
             WHERE venta_id = p_venta_id
         LOOP
             -- Consultar datos del producto
-            SELECT m2_caja, COALESCE(piezas_por_caja, 6), COALESCE(es_combo, FALSE)
+            SELECT m2_caja, GREATEST(COALESCE(piezas_por_caja, 6), 1), COALESCE(es_combo, FALSE)
             INTO v_m2_caja, v_pzs_por_caja, v_es_combo
             FROM inventario
             WHERE id = v_item.producto_id;
 
-            SELECT EXISTS (SELECT 1 FROM producto_componentes WHERE combo_id = v_item.producto_id) INTO v_tiene_componentes;
+            IF FOUND THEN
+                SELECT EXISTS (SELECT 1 FROM producto_componentes WHERE combo_id = v_item.producto_id) INTO v_tiene_componentes;
 
-            IF v_es_combo OR v_tiene_componentes THEN
-                -- Devolver stock a cada componente individual
-                FOR v_comp IN 
-                    SELECT pc.componente_id, pc.cantidad, i.m2_caja as m2_comp
-                    FROM producto_componentes pc
-                    JOIN inventario i ON pc.componente_id = i.id
-                    WHERE pc.combo_id = v_item.producto_id
-                LOOP
-                    v_cant_comp_req := (v_item.cantidad_cajas + v_item.piezas_sueltas) * v_comp.cantidad;
+                IF v_es_combo OR v_tiene_componentes THEN
+                    -- Devolver stock a cada componente individual
+                    FOR v_comp IN 
+                        SELECT pc.componente_id, pc.cantidad, i.m2_caja as m2_comp
+                        FROM producto_componentes pc
+                        JOIN inventario i ON pc.componente_id = i.id
+                        WHERE pc.combo_id = v_item.producto_id
+                    LOOP
+                        v_cant_comp_req := (COALESCE(v_item.cantidad_cajas, 0) + COALESCE(v_item.piezas_sueltas, 0)) * v_comp.cantidad;
 
-                    IF v_comp.m2_comp > 0 THEN
-                        UPDATE inventario 
-                        SET stock = stock + v_cant_comp_req
-                        WHERE id = v_comp.componente_id;
+                        IF v_comp.m2_comp > 0 THEN
+                            UPDATE inventario 
+                            SET stock = stock + v_cant_comp_req
+                            WHERE id = v_comp.componente_id;
 
-                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
-                        VALUES (v_comp.componente_id, 'ENTRADA', v_cant_comp_req, 0, 'ANULACION_VENTA', p_venta_id);
-                    ELSE
-                        UPDATE inventario 
-                        SET stock = stock + v_cant_comp_req
-                        WHERE id = v_comp.componente_id;
+                            INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                            VALUES (v_comp.componente_id, 'ENTRADA', v_cant_comp_req, 0, 'ANULACION_VENTA', p_venta_id);
+                        ELSE
+                            UPDATE inventario 
+                            SET stock = stock + v_cant_comp_req
+                            WHERE id = v_comp.componente_id;
 
-                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
-                        VALUES (v_comp.componente_id, 'ENTRADA', 0, v_cant_comp_req, 'ANULACION_VENTA', p_venta_id);
-                    END IF;
-                END LOOP;
-            ELSE
-                -- Restituir producto estándar
-                IF v_m2_caja > 0 THEN
-                    -- Normalizar cajas y piezas sueltas devueltas
-                    UPDATE inventario
-                    SET stock = stock + COALESCE(v_item.cantidad_cajas, 0) + ((piezas_sueltas + COALESCE(v_item.piezas_sueltas, 0)) / v_pzs_por_caja),
-                        piezas_sueltas = (piezas_sueltas + COALESCE(v_item.piezas_sueltas, 0)) % v_pzs_por_caja
-                    WHERE id = v_item.producto_id;
-
-                    INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
-                    VALUES (
-                        v_item.producto_id, 
-                        'ENTRADA', 
-                        COALESCE(v_item.cantidad_cajas, 0), 
-                        COALESCE(v_item.piezas_sueltas, 0), 
-                        'ANULACION_VENTA', 
-                        p_venta_id
-                    );
+                            INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                            VALUES (v_comp.componente_id, 'ENTRADA', 0, v_cant_comp_req, 'ANULACION_VENTA', p_venta_id);
+                        END IF;
+                    END LOOP;
                 ELSE
-                    -- Para productos por unidad
-                    UPDATE inventario
-                    SET stock = stock + COALESCE(v_item.piezas_sueltas, 0)
-                    WHERE id = v_item.producto_id;
+                    -- Restituir producto estándar
+                    IF v_m2_caja > 0 THEN
+                        -- Normalizar cajas y piezas sueltas devueltas
+                        UPDATE inventario
+                        SET stock = stock + COALESCE(v_item.cantidad_cajas, 0) + ((piezas_sueltas + COALESCE(v_item.piezas_sueltas, 0)) / v_pzs_por_caja),
+                            piezas_sueltas = (piezas_sueltas + COALESCE(v_item.piezas_sueltas, 0)) % v_pzs_por_caja
+                        WHERE id = v_item.producto_id;
 
-                    INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
-                    VALUES (
-                        v_item.producto_id, 
-                        'ENTRADA', 
-                        0, 
-                        COALESCE(v_item.piezas_sueltas, 0), 
-                        'ANULACION_VENTA', 
-                        p_venta_id
-                    );
+                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                        VALUES (
+                            v_item.producto_id, 
+                            'ENTRADA', 
+                            COALESCE(v_item.cantidad_cajas, 0), 
+                            COALESCE(v_item.piezas_sueltas, 0), 
+                            'ANULACION_VENTA', 
+                            p_venta_id
+                        );
+                    ELSE
+                        -- Para productos por unidad
+                        UPDATE inventario
+                        SET stock = stock + COALESCE(v_item.piezas_sueltas, 0)
+                        WHERE id = v_item.producto_id;
+
+                        INSERT INTO kardex (producto_id, tipo, cantidad_cajas, piezas_sueltas, motivo, referencia_id)
+                        VALUES (
+                            v_item.producto_id, 
+                            'ENTRADA', 
+                            0, 
+                            COALESCE(v_item.piezas_sueltas, 0), 
+                            'ANULACION_VENTA', 
+                            p_venta_id
+                        );
+                    END IF;
                 END IF;
             END IF;
         END LOOP;
     END IF;
 
-    -- 3. Marcar la venta como ANULADO
+    -- 3. Marcar la venta como ANULADO y limpiar saldo pendiente / estado de pago
     v_nota_anulacion := COALESCE(v_nota_actual, '') || 
         CHR(10) || '[ANULADO]: ' || COALESCE(p_motivo, 'Anulación de venta');
 
     UPDATE ventas
     SET estado = 'ANULADO',
+        estado_pago = 'ANULADO',
+        saldo_pendiente = 0.00,
         nota = TRIM(v_nota_anulacion)
     WHERE id = p_venta_id;
 

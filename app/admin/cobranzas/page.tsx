@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { getCuentasPorCobrar, registrarAbono, getAbonosVenta } from '../../lib/ventas.service'
 import { getEmpresas, getEmpresaActiva, Empresa } from '../../lib/empresas.service'
+import { anularVentaExistente } from '../ventas/actions'
 
 export default function CobranzasPage() {
   const [cuentas, setCuentas] = useState<any[]>([])
@@ -24,6 +25,11 @@ export default function CobranzasPage() {
   const [historialAbonos, setHistorialAbonos] = useState<any[]>([])
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
   const [modalHistorialOpen, setModalHistorialOpen] = useState(false)
+
+  // Modal para anular venta
+  const [ventaAnularModal, setVentaAnularModal] = useState<any | null>(null)
+  const [motivoAnulacion, setMotivoAnulacion] = useState('')
+  const [isAnulando, setIsAnulando] = useState(false)
 
   const cargarCuentas = async () => {
     setLoading(true)
@@ -108,6 +114,28 @@ export default function CobranzasPage() {
       console.error('Error al obtener abonos:', err)
     } finally {
       setCargandoHistorial(false)
+    }
+  }
+
+  const handleConfirmarAnulacion = async () => {
+    if (!ventaAnularModal) return
+    setIsAnulando(true)
+    setErrorMsg(null)
+    setSuccessMsg(null)
+    try {
+      const res = await anularVentaExistente(ventaAnularModal.id, motivoAnulacion)
+      if (res.success) {
+        setSuccessMsg(`✅ La venta en ruta ${ventaAnularModal.codigo_venta} ha sido anulada con éxito y su stock devuelto al inventario.`)
+        setVentaAnularModal(null)
+        setMotivoAnulacion('')
+        await cargarCuentas()
+      } else {
+        alert(`❌ Error al anular la venta: ${res.error}`)
+      }
+    } catch (err: any) {
+      alert(`❌ Error al anular la venta: ${err.message}`)
+    } finally {
+      setIsAnulando(false)
     }
   }
 
@@ -266,7 +294,7 @@ export default function CobranzasPage() {
                           {c.estado_pago === 'PAGADO_PARCIAL' ? 'Pagado Parcial' : 'Pendiente'}
                         </span>
                       </td>
-                      <td className="p-4 text-center space-x-2">
+                      <td className="p-4 text-center space-x-1.5 whitespace-nowrap">
                         <button
                           onClick={() => abrirModalAbono(c)}
                           className="px-3 py-1.5 bg-emerald-600 text-white font-bold text-xs rounded-md hover:bg-emerald-700 transition-colors shadow-sm"
@@ -279,6 +307,16 @@ export default function CobranzasPage() {
                           title="Ver historial de cobros"
                         >
                           📜 Pagos
+                        </button>
+                        <button
+                          onClick={() => {
+                            setVentaAnularModal(c)
+                            setMotivoAnulacion('')
+                          }}
+                          className="px-2.5 py-1.5 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-900 font-bold text-xs rounded-md transition-colors border border-red-200"
+                          title="Anular venta y devolver stock a inventario"
+                        >
+                          ❌ Anular
                         </button>
                       </td>
                     </tr>
@@ -465,6 +503,65 @@ export default function CobranzasPage() {
                 className="px-4 py-2 bg-slate-200 text-slate-700 font-bold text-sm rounded-lg hover:bg-slate-300"
               >
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CONFIRMACIÓN ANULACIÓN */}
+      {ventaAnularModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl border border-slate-200">
+            <div className="flex justify-between items-center border-b pb-3 mb-4">
+              <h3 className="text-lg font-bold text-red-600 flex items-center gap-2">
+                <span>❌</span> Anular Venta a Crédito
+              </h3>
+              <button 
+                onClick={() => setVentaAnularModal(null)}
+                disabled={isAnulando}
+                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-700 mb-2">
+              ¿Estás seguro de que deseas anular la venta <strong className="font-mono font-bold text-gray-900">{ventaAnularModal.codigo_venta}</strong> por el total de <strong className="text-blue-700">S/. {Number(ventaAnularModal.total).toFixed(2)}</strong> (Saldo: <strong className="text-red-600">S/. {Number(ventaAnularModal.saldo_pendiente || ventaAnularModal.total).toFixed(2)}</strong>)?
+            </p>
+
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs p-3 rounded-lg mb-4">
+              ⚠️ <strong>Nota:</strong> Al anular esta transacción, la deuda se cancelará automáticamente, la mercadería regresará al inventario y se generará una entrada en el Kardex.
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                Motivo o justificación de anulación (opcional):
+              </label>
+              <textarea
+                rows={2}
+                value={motivoAnulacion}
+                onChange={(e) => setMotivoAnulacion(e.target.value)}
+                placeholder="Ej: Cliente canceló pedido en ruta, devolución de mercadería..."
+                className="w-full border border-gray-300 rounded-lg p-2 text-xs focus:outline-none focus:border-red-500 text-gray-900"
+                disabled={isAnulando}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <button
+                onClick={() => setVentaAnularModal(null)}
+                disabled={isAnulando}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmarAnulacion}
+                disabled={isAnulando}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                {isAnulando ? '⏳ Anulando...' : 'Confirmar Anulación'}
               </button>
             </div>
           </div>
