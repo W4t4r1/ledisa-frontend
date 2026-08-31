@@ -1317,10 +1317,12 @@ BEGIN
             WHERE venta_id = p_venta_id
         LOOP
             -- Consultar datos del producto
-            SELECT m2_caja, GREATEST(COALESCE(piezas_por_caja, 6), 1), COALESCE(es_combo, FALSE)
-            INTO v_m2_caja, v_pzs_por_caja, v_es_combo
+            SELECT m2_caja, COALESCE(es_combo, FALSE)
+            INTO v_m2_caja, v_es_combo
             FROM inventario
             WHERE id = v_item.producto_id;
+
+            v_pzs_por_caja := 6;
 
             IF FOUND THEN
                 SELECT EXISTS (SELECT 1 FROM producto_componentes WHERE combo_id = v_item.producto_id) INTO v_tiene_componentes;

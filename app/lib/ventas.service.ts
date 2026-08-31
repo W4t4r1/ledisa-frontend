@@ -316,7 +316,7 @@ export async function anularVenta(ventaId: string, motivo?: string): Promise<boo
           for (const comp of componentes) {
             const { data: compProd } = await supabase
               .from('inventario')
-              .select('id, stock, piezas_sueltas, m2_caja, piezas_por_caja')
+              .select('id, stock, piezas_sueltas, m2_caja')
               .eq('id', comp.componente_id)
               .single()
 
@@ -357,13 +357,13 @@ export async function anularVenta(ventaId: string, motivo?: string): Promise<boo
           // Producto estándar
           const { data: prod } = await supabase
             .from('inventario')
-            .select('id, stock, piezas_sueltas, m2_caja, piezas_por_caja')
+            .select('id, stock, piezas_sueltas, m2_caja')
             .eq('id', item.producto_id)
             .single()
 
           if (prod) {
             const m2Caja = Number(prod.m2_caja || 0)
-            const pzsPorCaja = Math.max(Number(prod.piezas_por_caja || 6), 1)
+            const pzsPorCaja = 6
             const cjsDevueltas = Number(item.cantidad_cajas || 0)
             const pzsDevueltas = Number(item.piezas_sueltas || 0)
 
