@@ -255,18 +255,17 @@ export async function anularVenta(ventaId: string, motivo?: string): Promise<boo
     })
 
     if (!error) {
-      // Asegurar limpieza de saldo pendiente y estado de pago
+      // Asegurar limpieza de saldo pendiente y nota de anulación
       try {
         await supabase
           .from('ventas')
           .update({
             estado: 'ANULADO',
-            estado_pago: 'ANULADO',
             saldo_pendiente: 0.00
           })
           .eq('id', ventaId)
       } catch (errSync) {
-        console.warn('Advertencia al sincronizar estado de pago en anulación:', errSync)
+        console.warn('Advertencia al sincronizar anulación:', errSync)
       }
       return Boolean(data)
     }
@@ -419,7 +418,6 @@ export async function anularVenta(ventaId: string, motivo?: string): Promise<boo
     .from('ventas')
     .update({
       estado: 'ANULADO',
-      estado_pago: 'ANULADO',
       saldo_pendiente: 0.00,
       nota: notaAnulacion.trim()
     })

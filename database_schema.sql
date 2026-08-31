@@ -1392,13 +1392,12 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- 3. Marcar la venta como ANULADO y limpiar saldo pendiente / estado de pago
+    -- 3. Marcar la venta como ANULADO y limpiar saldo pendiente
     v_nota_anulacion := COALESCE(v_nota_actual, '') || 
         CHR(10) || '[ANULADO]: ' || COALESCE(p_motivo, 'Anulación de venta');
 
     UPDATE ventas
     SET estado = 'ANULADO',
-        estado_pago = 'ANULADO',
         saldo_pendiente = 0.00,
         nota = TRIM(v_nota_anulacion)
     WHERE id = p_venta_id;
