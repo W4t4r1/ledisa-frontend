@@ -16,6 +16,7 @@ interface WorkspaceCajaProps {
   sesionActivaInicial: CajaSesion | null
   movimientosIniciales: CajaChicaMovimiento[]
   ventasIniciales: any[]
+  abonosIniciales?: any[]
   historialCierresInicial: CajaSesion[]
 }
 
@@ -23,6 +24,7 @@ export default function WorkspaceCaja({
   sesionActivaInicial,
   movimientosIniciales,
   ventasIniciales,
+  abonosIniciales = [],
   historialCierresInicial
 }: WorkspaceCajaProps) {
   const [tabActiva, setTabActiva] = useState<'turno' | 'historial'>('turno')
@@ -32,6 +34,7 @@ export default function WorkspaceCaja({
   const [sesionActiva, setSesionActiva] = useState<CajaSesion | null>(sesionActivaInicial)
   const [movimientos, setMovimientos] = useState<CajaChicaMovimiento[]>(movimientosIniciales)
   const [ventas, setVentas] = useState<any[]>(ventasIniciales)
+  const [abonos, setAbonos] = useState<any[]>(abonosIniciales)
   const [historialCierres, setHistorialCierres] = useState<CajaSesion[]>(historialCierresInicial)
 
   // Reactividad ante actualizaciones del servidor
@@ -39,8 +42,9 @@ export default function WorkspaceCaja({
     setSesionActiva(sesionActivaInicial)
     setMovimientos(movimientosIniciales)
     setVentas(ventasIniciales)
+    setAbonos(abonosIniciales || [])
     setHistorialCierres(historialCierresInicial)
-  }, [sesionActivaInicial, movimientosIniciales, ventasIniciales, historialCierresInicial])
+  }, [sesionActivaInicial, movimientosIniciales, ventasIniciales, abonosIniciales, historialCierresInicial])
 
   // --- FORMULARIO APERTURA (EFECTIVO Y CUENTA BCP VINCULADA) ---
   const [montoAperturaEfectivo, setMontoAperturaEfectivo] = useState<number>(200)
@@ -94,30 +98,36 @@ export default function WorkspaceCaja({
   let ventasTarjeta = 0
   let ventasTransferencia = 0
 
-  ventasConfirmadas.forEach(v => {
-    const sumarCanal = (met: string, monto: number) => {
-      const m = (met || '').toLowerCase()
-      if (m.includes('efectivo')) {
-        ventasEfectivo += monto
-      } else if (m.includes('yape') || m.includes('plin')) {
-        ventasYape += monto
-      } else if (m.includes('tarjeta') || m.includes('credito') || m.includes('debito')) {
-        ventasTarjeta += monto
-      } else {
-        ventasTransferencia += monto
-      }
+  const sumarCanal = (met: string, monto: number) => {
+    const m = (met || '').toLowerCase()
+    if (m.includes('efectivo')) {
+      ventasEfectivo += monto
+    } else if (m.includes('yape') || m.includes('plin')) {
+      ventasYape += monto
+    } else if (m.includes('tarjeta') || m.includes('credito') || m.includes('debito')) {
+      ventasTarjeta += monto
+    } else {
+      ventasTransferencia += monto
     }
+  }
+
+  // 1. Procesar Ventas directas del turno
+  ventasConfirmadas.forEach(v => {
+    const esCredito = (v.metodo_pago || '').toLowerCase().includes('crédito') || (v.metodo_pago || '').toLowerCase().includes('credito')
 
     if (v.venta_pagos && v.venta_pagos.length > 0) {
       v.venta_pagos.forEach((vp: any) => {
         sumarCanal(vp.metodo_pago, Number(vp.monto))
       })
-    } else {
-      const montoRealVenta = v.monto_pagado !== null && v.monto_pagado !== undefined
-        ? Number(v.monto_pagado)
-        : (v.estado_pago === 'PENDIENTE' ? 0 : Number(v.total))
-      sumarCanal(v.metodo_pago || 'Efectivo', montoRealVenta)
+    } else if (!esCredito && v.estado_pago === 'PAGADO') {
+      // Venta al contado con pago único
+      sumarCanal(v.metodo_pago || 'Efectivo', Number(v.total))
     }
+  })
+
+  // 2. Procesar Abonos y Cobranzas en Ruta recaudados durante el turno
+  abonos.forEach(a => {
+    sumarCanal(a.metodo_pago || 'Efectivo', Number(a.monto))
   })
 
   // Movimientos de caja chica consolidados por canal
@@ -628,6 +638,63 @@ export default function WorkspaceCaja({
                                     {m.tipo === 'EGRESO' ? '-' : '+'} S/. {Number(m.monto).toFixed(2)}
                                   </td>
                                   <td className="p-2 pl-4 text-gray-800">{m.motivo}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Cobranzas y Abonos en Ruta del Turno */}
+                    <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 shadow-sm">
+                      <h3 className="text-base font-bold text-gray-800 flex items-center justify-between">
+                        <span>💰 Cobranzas y Abonos en Ruta ({abonos.length})</span>
+                        <span className="text-xs text-gray-500 font-normal">Recaudado: S/. {abonos.reduce((sum, a) => sum + Number(a.monto), 0).toFixed(2)}</span>
+                      </h3>
+
+                      {abonos.length === 0 ? (
+                        <p className="text-center py-6 text-gray-400 text-sm italic">
+                          No se han registrado cobranzas en ruta o abonos de crédito en este turno.
+                        </p>
+                      ) : (
+                        <div className="overflow-x-auto text-xs">
+                          <table className="w-full text-left">
+                            <thead>
+                              <tr className="bg-gray-50 text-gray-500 uppercase tracking-wider font-bold border-b">
+                                <th className="p-2">Hora</th>
+                                <th className="p-2">Venta</th>
+                                <th className="p-2">Cliente</th>
+                                <th className="p-2">Medio Pago</th>
+                                <th className="p-2 text-right">Monto</th>
+                                <th className="p-2 pl-4">Ref. / Nota</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 font-medium text-gray-700">
+                              {abonos.map((a: any) => (
+                                <tr key={a.id} className="hover:bg-gray-50/50">
+                                  <td className="p-2 text-gray-400">
+                                    {new Date(a.fecha).toLocaleTimeString('es-PE', {
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </td>
+                                  <td className="p-2 font-mono font-bold text-blue-700">
+                                    {a.ventas?.codigo_venta || 'Venta'}
+                                  </td>
+                                  <td className="p-2 font-semibold text-gray-800">
+                                    {a.clientes?.nombre_razon_social || 'Cliente'}
+                                  </td>
+                                  <td className="p-2">
+                                    <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-slate-100 text-slate-800 border border-slate-200">
+                                      {a.metodo_pago || 'Efectivo'}
+                                    </span>
+                                  </td>
+                                  <td className="p-2 text-right font-bold text-emerald-600">
+                                    + S/. {Number(a.monto).toFixed(2)}
+                                  </td>
+                                  <td className="p-2 pl-4 text-gray-500 text-[11px]">
+                                    {a.referencia ? `[Ref: ${a.referencia}] ` : ''}{a.nota || '-'}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>

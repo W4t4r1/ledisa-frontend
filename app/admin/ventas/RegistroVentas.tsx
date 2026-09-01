@@ -591,6 +591,22 @@ export default function RegistroVentas({
       }
     }
 
+    // Validar consistencia de Pago Dividido / Mixto
+    if (modoCobro === 'CONTADO' && esPagoDividido && estadoVenta !== 'COTIZACION') {
+      const sumaDividida = parseFloat(pagosDivididos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0).toFixed(2))
+      if (Math.abs(sumaDividida - totalVenta) > 0.01) {
+        const diff = parseFloat((totalVenta - sumaDividida).toFixed(2))
+        alert(`⚠️ El monto total asignado en Pago Dividido (S/ ${sumaDividida.toFixed(2)}) no coincide con el total de la venta (S/ ${totalVenta.toFixed(2)}).\n${diff > 0 ? `👉 Falta asignar: S/ ${diff.toFixed(2)}` : `👉 Excede por: S/ ${Math.abs(diff).toFixed(2)}`}.\nPor favor ajusta los montos antes de registrar la venta.`)
+        return
+      }
+
+      const pagosValidos = pagosDivididos.filter(p => Number(p.monto) > 0)
+      if (pagosValidos.length === 0) {
+        alert('⚠️ Ingresa al menos un método de pago con monto mayor a S/ 0.')
+        return
+      }
+    }
+
     startTransition(async () => {
       try {
         // 0. Dar de alta automáticamente los productos eventuales en el catálogo de inventario
@@ -682,21 +698,50 @@ export default function RegistroVentas({
           }
         }
 
-        // 2. Procesar la Venta asignando los costos reales de adquisición
+        // 2. Procesar la Venta asignando los costos y métodos correctos
         const empresaIdActiva = typeof window !== 'undefined' ? localStorage.getItem('ledisa_empresa_activa_id') : null
-        const pagosFiltrados = esPagoDividido ? pagosDivididos.filter(p => Number(p.monto) > 0) : []
+        
+        let metodoPagoFinal = metodoPago
+        let estadoPagoFinal: 'PAGADO' | 'PENDIENTE' | 'PAGADO_PARCIAL' = 'PAGADO'
+        let pagosFinales: { metodo_pago: string; monto: number; referencia?: string }[] | undefined = undefined
+
+        if (modoCobro === 'DESPACHO_CREDITO') {
+          metodoPagoFinal = 'Crédito (Cobro en Ruta)'
+          estadoPagoFinal = 'PENDIENTE'
+          pagosFinales = undefined
+        } else if (estadoVenta === 'COTIZACION') {
+          metodoPagoFinal = metodoPago
+          estadoPagoFinal = 'PENDIENTE'
+          pagosFinales = undefined
+        } else if (esPagoDividido) {
+          const pagosValidos = pagosDivididos.filter(p => Number(p.monto) > 0)
+          metodoPagoFinal = pagosValidos.length > 1 ? 'Pago Mixto' : (pagosValidos[0]?.metodo_pago || 'Efectivo')
+          estadoPagoFinal = 'PAGADO'
+          pagosFinales = pagosValidos.map(p => ({
+            metodo_pago: p.metodo_pago,
+            monto: parseFloat(Number(p.monto).toFixed(2)),
+            referencia: p.referencia || undefined
+          }))
+        } else {
+          metodoPagoFinal = metodoPago
+          estadoPagoFinal = 'PAGADO'
+          pagosFinales = [{
+            metodo_pago: metodoPago,
+            monto: totalVenta
+          }]
+        }
 
         const payload = {
           cliente_id: clienteSeleccionado ? clienteSeleccionado.id : null,
           subtotal: subtotalVenta,
           descuento: descuento,
           total: totalVenta,
-          metodo_pago: esPagoDividido ? 'Pago Mixto' : metodoPago,
+          metodo_pago: metodoPagoFinal,
           estado: modoCobro === 'DESPACHO_CREDITO' ? 'ENTREGADO' : estadoVenta,
           nota: nota.trim() || undefined,
           empresa_id: empresaIdActiva || null,
-          estado_pago: (modoCobro === 'DESPACHO_CREDITO' ? 'PENDIENTE' : 'PAGADO') as 'PAGADO' | 'PENDIENTE' | 'PAGADO_PARCIAL',
-          pagos: esPagoDividido && pagosFiltrados.length > 0 ? pagosFiltrados : undefined,
+          estado_pago: estadoPagoFinal,
+          pagos: pagosFinales,
           items: carrito.map(item => ({
             producto_id: item.producto.id,
             cantidad_cajas: item.cantidad_cajas,
@@ -720,12 +765,14 @@ export default function RegistroVentas({
         const payloadExito = {
           codigo_venta: codigoGenerado,
           fecha: new Date().toISOString(),
-          metodo_pago: metodoPago,
+          metodo_pago: metodoPagoFinal,
           subtotal: subtotalVenta,
           descuento: descuento,
           total: totalVenta,
           nota: nota.trim() || undefined,
-          estado: estadoVenta,
+          estado: modoCobro === 'DESPACHO_CREDITO' ? 'ENTREGADO' : estadoVenta,
+          estado_pago: estadoPagoFinal,
+          pagos: pagosFinales,
           clientes: clienteSeleccionado ? {
             tipo_documento: clienteSeleccionado.tipo_documento,
             documento: clienteSeleccionado.documento,
@@ -1316,7 +1363,16 @@ export default function RegistroVentas({
                       <input
                         type="checkbox"
                         checked={esPagoDividido}
-                        onChange={(e) => setEsPagoDividido(e.target.checked)}
+                        onChange={(e) => {
+                          const activar = e.target.checked
+                          setEsPagoDividido(activar)
+                          if (activar && pagosDivididos.length === 0) {
+                            setPagosDivididos([
+                              { metodo_pago: 'Efectivo', monto: totalVenta > 0 ? parseFloat((totalVenta / 2).toFixed(2)) : 0, referencia: '' },
+                              { metodo_pago: 'Yape/Plin', monto: totalVenta > 0 ? parseFloat((totalVenta - (totalVenta / 2)).toFixed(2)) : 0, referencia: '' }
+                            ])
+                          }
+                        }}
                         className="rounded text-[#04558C] focus:ring-[#04558C]"
                       />
                       <span>🔄 Pago Dividido / Mixto</span>
@@ -1337,38 +1393,137 @@ export default function RegistroVentas({
                       <option value="Sin Especificar">Otros</option>
                     </select>
                   ) : (
-                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2 text-xs">
-                      <p className="font-bold text-slate-700">Desglose de Pago Dividido:</p>
-                      {pagosDivididos.map((pago, index) => (
-                        <div key={index} className="flex gap-2 items-center">
-                          <select
-                            value={pago.metodo_pago}
-                            onChange={(e) => {
-                              const copy = [...pagosDivididos]
-                              copy[index].metodo_pago = e.target.value
-                              setPagosDivididos(copy)
-                            }}
-                            className="w-1/2 border p-1.5 rounded bg-white text-slate-800 font-semibold"
-                          >
-                            <option value="Efectivo">💵 Efectivo</option>
-                            <option value="Yape/Plin">📱 Yape / Plin</option>
-                            <option value="Transferencia BCP">🏦 Transf. BCP</option>
-                            <option value="Tarjeta Credito/Debito">💳 Tarjeta</option>
-                          </select>
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Monto S/"
-                            value={pago.monto || ''}
-                            onChange={(e) => {
-                              const copy = [...pagosDivididos]
-                              copy[index].monto = parseFloat(e.target.value) || 0
-                              setPagosDivididos(copy)
-                            }}
-                            className="w-1/2 border p-1.5 rounded bg-white font-bold text-slate-900"
-                          />
-                        </div>
-                      ))}
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="font-black text-slate-800 uppercase tracking-wider text-[11px]">
+                          Desglose de Pagos Mixtos:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const totalAsignado = pagosDivididos.reduce((s, p) => s + (Number(p.monto) || 0), 0)
+                            const restante = Math.max(0, parseFloat((totalVenta - totalAsignado).toFixed(2)))
+                            setPagosDivididos([
+                              ...pagosDivididos,
+                              { metodo_pago: 'Transferencia BCP', monto: restante, referencia: '' }
+                            ])
+                          }}
+                          className="text-[10px] bg-[#04558C] hover:bg-[#033f6b] text-white px-2 py-1 rounded font-bold transition-colors cursor-pointer"
+                        >
+                          + Agregar Método
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        {pagosDivididos.map((pago, index) => (
+                          <div key={index} className="p-2 rounded-lg bg-white border border-slate-200 space-y-1.5 shadow-2xs">
+                            <div className="flex gap-2 items-center">
+                              <select
+                                value={pago.metodo_pago}
+                                onChange={(e) => {
+                                  const copy = [...pagosDivididos]
+                                  copy[index].metodo_pago = e.target.value
+                                  setPagosDivididos(copy)
+                                }}
+                                className="w-1/2 border p-1.5 rounded bg-white text-slate-800 font-bold text-xs"
+                              >
+                                <option value="Efectivo">💵 Efectivo</option>
+                                <option value="Yape/Plin">📱 Yape / Plin</option>
+                                <option value="Transferencia BCP">🏦 Transf. BCP</option>
+                                <option value="Transferencia Interbancaria">🏦 Transf. Interbancaria</option>
+                                <option value="Tarjeta Credito/Debito">💳 Tarjeta POS</option>
+                              </select>
+
+                              <div className="relative w-1/2">
+                                <span className="absolute left-2 top-1.5 text-slate-400 font-bold text-xs">S/</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  placeholder="0.00"
+                                  value={pago.monto || ''}
+                                  onChange={(e) => {
+                                    const copy = [...pagosDivididos]
+                                    copy[index].monto = parseFloat(e.target.value) || 0
+                                    setPagosDivididos(copy)
+                                  }}
+                                  className="w-full border p-1.5 pl-7 rounded bg-white font-black text-slate-900 text-xs focus:ring-1 focus:ring-[#04558C] focus:outline-none"
+                                />
+                              </div>
+
+                              {pagosDivididos.length > 1 && (
+                                <button
+                                  type="button"
+                                  title="Eliminar método"
+                                  onClick={() => setPagosDivididos(pagosDivididos.filter((_, i) => i !== index))}
+                                  className="text-red-500 hover:text-red-700 p-1 text-sm font-bold cursor-pointer"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+
+                            <input
+                              type="text"
+                              placeholder="N° Operación / Referencia (Opcional)"
+                              value={pago.referencia || ''}
+                              onChange={(e) => {
+                                const copy = [...pagosDivididos]
+                                copy[index].referencia = e.target.value
+                                setPagosDivididos(copy)
+                              }}
+                              className="w-full border border-dashed p-1 px-2 rounded bg-slate-50 text-slate-700 text-[10px]"
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Monitor de cuadre en tiempo real */}
+                      {(() => {
+                        const totalAsignado = parseFloat(pagosDivididos.reduce((s, p) => s + (Number(p.monto) || 0), 0).toFixed(2))
+                        const diferencia = parseFloat((totalVenta - totalAsignado).toFixed(2))
+                        const cuadreExacto = Math.abs(diferencia) <= 0.01
+
+                        return (
+                          <div className={`p-2.5 rounded-lg border text-[11px] font-bold space-y-1 ${
+                            cuadreExacto
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                              : diferencia > 0
+                              ? 'bg-amber-50 border-amber-200 text-amber-800'
+                              : 'bg-red-50 border-red-200 text-red-800'
+                          }`}>
+                            <div className="flex justify-between items-center">
+                              <span>Total Asignado: S/ {totalAsignado.toFixed(2)}</span>
+                              <span>Total Venta: S/ {totalVenta.toFixed(2)}</span>
+                            </div>
+
+                            <div className="flex justify-between items-center pt-1 border-t border-current/20">
+                              {cuadreExacto ? (
+                                <span className="flex items-center gap-1">✅ Pagos exactamente cuadrados</span>
+                              ) : diferencia > 0 ? (
+                                <>
+                                  <span>⚠️ Falta asignar: S/ {diferencia.toFixed(2)}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const copy = [...pagosDivididos]
+                                      if (copy.length > 0) {
+                                        const ultimoIdx = copy.length - 1
+                                        copy[ultimoIdx].monto = parseFloat((Number(copy[ultimoIdx].monto || 0) + diferencia).toFixed(2))
+                                        setPagosDivididos(copy)
+                                      }
+                                    }}
+                                    className="underline text-[10px] hover:text-amber-900 cursor-pointer font-extrabold"
+                                  >
+                                    ⚡ Completar restante
+                                  </button>
+                                </>
+                              ) : (
+                                <span>❌ Excede por: S/ {Math.abs(diferencia).toFixed(2)}</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>

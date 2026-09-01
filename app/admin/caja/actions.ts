@@ -8,6 +8,7 @@ import {
   crearMovimientoCajaChica,
   getMovimientosSesion,
   getVentasSesionCaja,
+  getAbonosSesionCaja,
   ejecutarCierreCaja,
   getHistorialSesionesCaja,
   CajaChicaMovimiento
@@ -143,6 +144,17 @@ export async function obtenerMovimientosDeSesion(sesionId: string) {
 export async function obtenerVentasDeSesion(sesionId: string) {
   try {
     return await getVentasSesionCaja(sesionId)
+  } catch (error: any) {
+    throw new Error(error.message)
+  }
+}
+
+/**
+ * Carga abonos/cobranzas registrados durante una sesión.
+ */
+export async function obtenerAbonosDeSesion(sesionId: string) {
+  try {
+    return await getAbonosSesionCaja(sesionId)
   } catch (error: any) {
     throw new Error(error.message)
   }

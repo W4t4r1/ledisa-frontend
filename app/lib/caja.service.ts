@@ -250,6 +250,41 @@ export async function getVentasSesionCaja(sesionId: string): Promise<any[]> {
 }
 
 /**
+ * Obtiene todos los abonos y cobros en ruta registrados durante una sesión de caja.
+ */
+export async function getAbonosSesionCaja(sesionId: string): Promise<any[]> {
+  const { data, error } = await supabase
+    .from('venta_abonos')
+    .select(`
+      id,
+      venta_id,
+      cliente_id,
+      monto,
+      metodo_pago,
+      referencia,
+      nota,
+      fecha,
+      ventas (
+        codigo_venta,
+        total
+      ),
+      clientes (
+        nombre_razon_social,
+        documento
+      )
+    `)
+    .eq('sesion_caja_id', sesionId)
+    .order('fecha', { ascending: false })
+
+  if (error && error.code !== 'PGRST116') {
+    console.warn('Error al cargar abonos de la sesión:', error.message)
+    return []
+  }
+
+  return data || []
+}
+
+/**
  * Realiza el cuadre final de caja (arqueo) y cierra el turno de caja.
  * Soporta desgloses de pagos mixtos y abonos a crédito cobrados en el turno.
  */
@@ -296,7 +331,7 @@ export async function ejecutarCierreCaja(
     throw new Error(`Error al consolidar ventas del turno: ${errVentas.message}`)
   }
 
-  // 2. Obtener abonos recibidos durante este turno (cobranzas de crédito)
+  // 2. Obtener abonos recibidos durante este turno (cobranzas de crédito y ruta)
   const { data: abonos, error: errAbonos } = await supabase
     .from('venta_abonos')
     .select('monto, metodo_pago')
@@ -329,21 +364,21 @@ export async function ejecutarCierreCaja(
     else vTransferencia += monto
   }
 
-  // Procesar ventas y sus desgloses
+  // Procesar ventas directas y sus desgloses
   ventas?.forEach(v => {
+    const esCredito = (v.metodo_pago || '').toLowerCase().includes('crédito') || (v.metodo_pago || '').toLowerCase().includes('credito')
+    
     if (v.venta_pagos && v.venta_pagos.length > 0) {
       v.venta_pagos.forEach((vp: any) => {
         sumarMetodo(vp.metodo_pago, Number(vp.monto))
       })
-    } else {
-      const montoEfectivoVenta = v.monto_pagado !== null && v.monto_pagado !== undefined
-        ? Number(v.monto_pagado)
-        : (v.estado_pago === 'PENDIENTE' ? 0 : Number(v.total))
-      sumarMetodo(v.metodo_pago || 'Efectivo', montoEfectivoVenta)
+    } else if (!esCredito && v.estado_pago === 'PAGADO') {
+      // Venta al contado cobrada al momento de registrar
+      sumarMetodo(v.metodo_pago || 'Efectivo', Number(v.total))
     }
   })
 
-  // Procesar abonos de cobranza en la tarde
+  // Procesar abonos de cobranza en ruta o crédito recaudados en este turno
   abonos?.forEach(a => {
     sumarMetodo(a.metodo_pago || 'Efectivo', Number(a.monto))
   })

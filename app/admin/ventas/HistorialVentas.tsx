@@ -22,6 +22,11 @@ interface Venta {
     documento: string
     nombre_razon_social: string
   } | null
+  venta_pagos?: {
+    metodo_pago: string
+    monto: number
+    referencia?: string
+  }[]
 }
 
 export default function HistorialVentas({ 
@@ -311,6 +316,15 @@ export default function HistorialVentas({
               <div className="space-y-1 md:text-right">
                 <p className="text-gray-500 font-medium">Pago y Registro:</p>
                 <p className="font-bold text-gray-800">Medio: {ventaSeleccionada.metodo_pago}</p>
+                {ventaSeleccionada.venta_pagos && ventaSeleccionada.venta_pagos.length > 0 && (
+                  <div className="flex flex-wrap gap-1 md:justify-end mt-1">
+                    {ventaSeleccionada.venta_pagos.map((vp, idx) => (
+                      <span key={idx} className="bg-slate-100 border border-slate-200 text-slate-700 text-[10px] px-1.5 py-0.5 rounded font-semibold">
+                        {vp.metodo_pago}: S/. {Number(vp.monto).toFixed(2)}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-1 md:justify-end flex">
                   {getBadgeEstado(ventaSeleccionada)}
                 </div>

@@ -1,5 +1,5 @@
 // app/admin/caja/page.tsx
-import { getSesionCajaActiva, getMovimientosSesion, getVentasSesionCaja, getHistorialSesionesCaja } from '../../lib/caja.service'
+import { getSesionCajaActiva, getMovimientosSesion, getVentasSesionCaja, getAbonosSesionCaja, getHistorialSesionesCaja } from '../../lib/caja.service'
 import WorkspaceCaja from './WorkspaceCaja'
 
 export const dynamic = 'force-dynamic'
@@ -8,6 +8,7 @@ export default async function CajaPage() {
   let activa: any = null
   let movimientos: any[] = []
   let ventas: any[] = []
+  let abonos: any[] = []
   let historial: any[] = []
   let errorBD = null
 
@@ -15,12 +16,14 @@ export default async function CajaPage() {
     activa = await getSesionCajaActiva()
     if (activa) {
       // Carga en paralelo si hay una caja abierta
-      const [resMovimientos, resVentas] = await Promise.all([
+      const [resMovimientos, resVentas, resAbonos] = await Promise.all([
         getMovimientosSesion(activa.id),
-        getVentasSesionCaja(activa.id)
+        getVentasSesionCaja(activa.id),
+        getAbonosSesionCaja(activa.id)
       ])
       movimientos = resMovimientos
       ventas = resVentas
+      abonos = resAbonos
     }
     // Carga de cierres históricos
     historial = await getHistorialSesionesCaja()
@@ -41,6 +44,7 @@ export default async function CajaPage() {
       sesionActivaInicial={activa}
       movimientosIniciales={movimientos}
       ventasIniciales={ventas}
+      abonosIniciales={abonos}
       historialCierresInicial={historial}
     />
   )
