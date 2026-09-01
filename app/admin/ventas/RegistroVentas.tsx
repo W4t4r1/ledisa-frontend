@@ -706,7 +706,7 @@ export default function RegistroVentas({
         let pagosFinales: { metodo_pago: string; monto: number; referencia?: string }[] | undefined = undefined
 
         if (modoCobro === 'DESPACHO_CREDITO') {
-          metodoPagoFinal = 'Crédito (Cobro en Ruta)'
+          metodoPagoFinal = 'Credito'
           estadoPagoFinal = 'PENDIENTE'
           pagosFinales = undefined
         } else if (estadoVenta === 'COTIZACION') {
